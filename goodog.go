@@ -42,7 +42,7 @@ func VersionInfo() string {
 			if space {
 				info.WriteString(" ")
 			}
-			info.WriteString("rev@")
+			info.WriteString("git@")
 			info.WriteString(GitRev)
 		}
 		info.WriteString("]")
@@ -50,6 +50,7 @@ func VersionInfo() string {
 	return info.String()
 }
 
+// Modified from https://github.com/caddyserver/caddy/blob/v2/caddy.go#L520-L540
 func goModule() debug.Module {
 	defltmod := debug.Module{Version: "unknown"}
 	bi, ok := debug.ReadBuildInfo()
