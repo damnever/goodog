@@ -5,11 +5,9 @@ import (
 
 	caddy "github.com/caddyserver/caddy/v2"
 	caddycmd "github.com/caddyserver/caddy/v2/cmd"
-
-	// Plug in Caddy modules here
-	_ "github.com/caddyserver/caddy/v2/modules/standard"
+	_ "github.com/caddyserver/caddy/v2/modules/standard" // Caddy standard modules
 	"github.com/damnever/goodog"
-	_ "github.com/damnever/goodog/backend/caddy"
+	_ "github.com/damnever/goodog/backend/caddy" // Caddy module: http.handlers.goodog
 )
 
 func main() {
