@@ -80,6 +80,7 @@ func (p *udpProxy) handle(ctx context.Context, downstreamAddr net.Addr, data []b
 }
 
 func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr) (io.Writer, error) {
+	// FIXME(damnever): what a fucking mess..
 	addrStr := downstreamAddr.String()
 	p.upmu.RLock()
 	w, ok := p.ups[addrStr]
@@ -114,6 +115,7 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 			p.upmu.Lock()
 			delete(p.ups, addrStr)
 			p.upmu.Unlock()
+			upreqrPipe.Close()
 			uprespr.Close()
 		}()
 
@@ -156,7 +158,7 @@ type snappyShortWriter struct {
 func newSnappyShortWriter(origin io.WriteCloser) snappyShortWriter {
 	return snappyShortWriter{
 		origin:  origin,
-		snappyw: snappy.NewBufferedWriter(origin),
+		snappyw: snappy.NewWriter(origin),
 	}
 }
 
@@ -170,7 +172,7 @@ func (w snappyShortWriter) Write(p []byte) (int, error) {
 
 func (w snappyShortWriter) Close() error {
 	multierr := &errorsext.MultiErr{}
-	multierr.Append(w.snappyw.Close())
+	// multierr.Append(w.snappyw.Close()) // FIXME(damnever): race
 	multierr.Append(w.origin.Close()) // XXX: There is no need to close for UDP..
 	return multierr.Err()
 }

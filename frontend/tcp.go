@@ -40,15 +40,21 @@ func (p *tcpProxy) Close() error {
 }
 
 func (p *tcpProxy) handle(ctx context.Context, conn net.Conn) {
+	// FIXME(damnever): what a fucking mess..
 	defer conn.Close()
 	downstream := netext.NewTimedConn(conn, p.conf.ReadTimeout, p.conf.WriteTimeout)
+
 	var downstreamReader io.Reader = downstream
+	var reqwriter func()
 	switch p.conf.Compression {
 	case "snappy":
 		r, w := io.Pipe()
+		defer r.Close()
 		downstreamReader = r
-		go func() {
-			snappyw := snappy.NewBufferedWriter(w)
+
+		reqwriter = func() {
+			defer w.Close()
+			snappyw := snappy.NewWriter(w)
 			defer snappyw.Close()
 			if _, err := io.Copy(snappyw, downstream); err != nil {
 				p.logger.Error("streaming from downstream to upstream failed",
@@ -57,7 +63,7 @@ func (p *tcpProxy) handle(ctx context.Context, conn net.Conn) {
 					zap.Error(err),
 				)
 			}
-		}()
+		}
 	default:
 	}
 
@@ -77,6 +83,10 @@ func (p *tcpProxy) handle(ctx context.Context, conn net.Conn) {
 	case "snappy":
 		upstreamReader = snappy.NewReader(upr)
 	default:
+	}
+
+	if reqwriter != nil {
+		go reqwriter()
 	}
 	if _, err := io.Copy(downstream, upstreamReader); err != nil {
 		p.logger.Error("streaming from upstream to downstream failed",

@@ -5,11 +5,6 @@ import (
 	"time"
 )
 
-type User struct {
-	Name     string `json:"name"`
-	Password string `json:"password"`
-}
-
 type Options struct {
 	Path           string        `json:"path"`
 	UpstreamTCP    string        `json:"upstream_tcp"`
@@ -17,7 +12,6 @@ type Options struct {
 	ConnectTimeout time.Duration `json:"connect_timeout"`
 	ReadTimeout    time.Duration `json:"read_timeout"`
 	WriteTimeout   time.Duration `json:"write_timeout"`
-	Users          []User        `json:"users"`
 }
 
 func (opts *Options) UnmarshalJSON(data []byte) error {
@@ -28,7 +22,6 @@ func (opts *Options) UnmarshalJSON(data []byte) error {
 		ConnectTimeout string `json:"connect_timeout"`
 		ReadTimeout    string `json:"read_timeout"`
 		WriteTimeout   string `json:"write_timeout"`
-		Users          []User `json:"users"`
 	}
 	if err := json.Unmarshal(data, &fakeOptions); err != nil {
 		return err
@@ -37,7 +30,6 @@ func (opts *Options) UnmarshalJSON(data []byte) error {
 	opts.Path = fakeOptions.Path
 	opts.UpstreamTCP = fakeOptions.UpstreamTCP
 	opts.UpstreamUDP = fakeOptions.UpstreamUDP
-	opts.Users = fakeOptions.Users
 	// FUCK????
 	d, err := time.ParseDuration(fakeOptions.ConnectTimeout)
 	if err != nil {

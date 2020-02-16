@@ -59,7 +59,7 @@ func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriter) er
 		buf := make([]byte, math.MaxUint16, math.MaxUint16)
 		for {
 			upstream.SetReadDeadline(time.Now().Add(f.opts.ReadTimeout))
-			n, _, err := upstream.ReadFrom(buf) // XXX: UDP.Read actually works at here
+			n, err := upstream.Read(buf)
 			if err != nil {
 				errc <- err
 				return
@@ -83,7 +83,8 @@ func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriter) er
 				return
 			}
 			upstream.SetWriteDeadline(time.Now().Add(f.opts.WriteTimeout))
-			if _, err := upstream.WriteTo(buf[:n], upstreamAddr); err != nil {
+			// NOTE: use of WriteTo with pre-connected connection
+			if _, err := upstream.Write(buf[:n]); err != nil {
 				errc <- err
 				return
 			}

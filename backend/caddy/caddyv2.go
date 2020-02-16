@@ -74,11 +74,6 @@ func (g *GoodogCaddyAdapter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				return err
 			}
 			g.Options.WriteTimeout = d
-		case "users":
-			for _, user := range args[1:] {
-				parts := strings.SplitN(user, ":", 2)
-				g.Options.Users = append(g.Options.Users, User{Name: parts[0], Password: parts[1]})
-			}
 		}
 	}
 	return nil
@@ -112,14 +107,11 @@ func (g *GoodogCaddyAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 		next.ServeHTTP(w, r)
 		return nil
 	}
+	defer r.Body.Close()
 
 	w.Header().Set("Server", "Not-Found")
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusPaymentRequired) // ^_^
-		return nil
-	}
-	if r.Header.Get("Transfer-Encoding") != "chunked" {
-		w.WriteHeader(http.StatusBadRequest)
 		return nil
 	}
 	args := r.URL.Query()
@@ -127,7 +119,6 @@ func (g *GoodogCaddyAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 		w.WriteHeader(http.StatusBadRequest)
 		return nil
 	}
-	defer r.Body.Close()
 
 	rw := ioext.WithReadWriter{
 		Reader: r.Body,
@@ -136,7 +127,7 @@ func (g *GoodogCaddyAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 	switch strings.ToLower(args.Get("compression")) {
 	case "snappy":
 		rw.Reader = snappy.NewReader(r.Body)
-		snappyw := snappy.NewBufferedWriter(w)
+		snappyw := snappy.NewWriter(w)
 		defer snappyw.Close()
 		rw.Writer = snappyw
 	default:

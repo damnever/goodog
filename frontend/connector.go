@@ -50,6 +50,7 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context, in io.Reader) (io.Rea
 	}
 	req = req.WithContext(ctx)
 	req.Header.Set("Transfer-Encoding", "chunked")
+	req.Header.Set("User-Agent", "goodog/frontend")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
