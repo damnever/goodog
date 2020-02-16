@@ -20,7 +20,6 @@ var (
 	flagServerURI      = flagset.String("server", "https://<DOMAIN>/?version=v1&compression=snappy", "The remote server URI")
 	flagConnector      = flagset.String("connector", "caddy-http3", "The connector(backend) type: [caddy-http3]")
 	flagLogLevel       = flagset.String("log-level", "info", "The log level: [debug, info, warn, error, panic, fatal]")
-	flagCompression    = flagset.String("compression", "snappy", "The compression method: [snappy]")
 	flagConnectTimeout = flagset.Duration("connect-timeout", 5*time.Second, "The connect timeout")
 	flagReadTimeout    = flagset.Duration("read-timeout", 1*time.Minute, "The read timeout")
 	flagWriteTimeout   = flagset.Duration("write-timeout", 3*time.Second, "The write timeout")

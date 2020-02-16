@@ -1,4 +1,9 @@
 {
+  "admin": {
+    "enforce_origin": true,
+    "origins": ["localhost:2019", "127.0.0.1:2019"],
+    "config": { "persist": true }
+  },
   "apps": {
     "http": {
       "servers": {
@@ -10,10 +15,27 @@
           "experimental_http3": true,
           "listen": ["<DOMAIN>"],
           "read_timeout": "30s",
-          "write_timeout": "10s",
+          "read_header_timeout": "5s",
+          "write_timeout": "5s",
           "routes": [
             {
               "handle": [
+                {
+                  "handler": "authentication",
+                  "providers": {
+                    "http_basic": {
+                      "hash": { "algorithm": "bcrypt" },
+                      "realm": "restricted",
+                      "accounts": [
+                        {
+                          "username": "<USERNAME>",
+                          "password": "<HASHED-PASSWORD,BASE64-ENCODED>",
+                          "salt": ""
+                        }
+                      ]
+                    }
+                  }
+                },
                 {
                   "handler": "goodog",
                   "upstream_tcp": "<TCP-SERVER>",
@@ -21,13 +43,24 @@
                   "connect_timeout": "10s",
                   "read_timeout": "1m",
                   "write_timeout": "10s",
-                  "path": "/",
-                  "users": [{"name": "knock", "password": "knock"}]
+                  "path": "/"
                 }
               ],
               "terminal": true
             }
-          ]
+          ],
+          "errors": {
+            "routes": [
+              {
+                "handle": [
+                  {
+                    "handler": "static_response",
+                    "body": "<h1>Ooops</h1>"
+                  }
+                ]
+              }
+            ]
+          }
         }
       }
     }
