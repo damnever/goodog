@@ -1,0 +1,70 @@
+{
+  "admin": {
+    "config": { "persist": false }
+  },
+  "apps": {
+    "http": {
+      "servers": {
+        "goodog": {
+          "automatic_https": {"disable": true},
+          "experimental_http3": true,
+          "listen": ["%s"],
+          "read_timeout": "30s",
+          "write_timeout": "10s",
+          "routes": [
+            {
+              "match": [ {"path": ["/"]} ],
+              "handle": [
+                {
+                  "handler": "authentication",
+                  "providers": {
+                    "http_basic": {
+                      "hash": { "algorithm": "bcrypt" },
+                      "realm": "restricted",
+                      "accounts": [
+                        {
+                          "username": "knock",
+                          "password": "JDJhJDEwJDJoRlRlUGt1NGdUMjRkV0EwNkpwVS4ucHZlcjQuWTZDSGR4S2Q5enFzTG5ESHdvT2xvSVZ1",
+                          "salt": ""
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "handler": "goodog",
+                  "upstream_tcp": "%s",
+                  "upstream_udp": "%s",
+                  "connect_timeout": "10s",
+                  "read_timeout": "30s",
+                  "write_timeout": "10s"
+                }
+              ],
+              "terminal": true
+            }
+          ],
+          "tls_connection_policies": [
+            {
+              "match": { "sni": [""] },
+              "certificate_selection": {
+                "policy": "custom",
+                "tag": "goodog"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "tls": {
+      "certificates": {
+        "load_pem": [
+          {
+            "certificate": "%s",
+            "key": "%s",
+            "tags": ["goodog"]
+          }
+        ]
+      }
+    }
+  }
+}
