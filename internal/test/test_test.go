@@ -39,6 +39,7 @@ var caddyconfig = `{
           "write_timeout": "10s",
           "routes": [
             {
+              "match": [ {"path": ["/"]} ],
               "handle": [
                 {
                   "handler": "authentication",

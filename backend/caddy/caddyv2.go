@@ -50,8 +50,6 @@ func (g *GoodogCaddyAdapter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			continue
 		}
 		switch args[0] {
-		case "path":
-			g.Options.Path = args[1]
 		case "upstream_tcp":
 			g.Options.UpstreamTCP = args[1]
 		case "upstream_udp":
@@ -103,17 +101,12 @@ func (g *GoodogCaddyAdapter) Cleanup() error {
 }
 
 func (g *GoodogCaddyAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	if strings.ToLower(strings.TrimLeft(r.URL.Path, "/")) != g.Options.Path {
+	if r.Method != http.MethodPost {
 		next.ServeHTTP(w, r)
 		return nil
 	}
-	defer r.Body.Close()
 
-	w.Header().Set("Server", "Not-Found")
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusPaymentRequired) // ^_^
-		return nil
-	}
+	defer r.Body.Close()
 	args := r.URL.Query()
 	if args.Get("version") != "v1" {
 		w.WriteHeader(http.StatusBadRequest)

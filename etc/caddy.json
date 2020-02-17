@@ -19,6 +19,7 @@
           "write_timeout": "5s",
           "routes": [
             {
+              "match": [ {"path": ["/"]} ],
               "handle": [
                 {
                   "handler": "authentication",
@@ -37,13 +38,18 @@
                   }
                 },
                 {
+                  "handler": "headers",
+                  "response": {
+                    "set": { "Server": ["TEST"] }
+                  }
+                },
+                {
                   "handler": "goodog",
                   "upstream_tcp": "<TCP-SERVER>",
                   "upstream_udp": "<UDP-SERVER>",
                   "connect_timeout": "10s",
                   "read_timeout": "1m",
-                  "write_timeout": "10s",
-                  "path": "/"
+                  "write_timeout": "10s"
                 }
               ],
               "terminal": true

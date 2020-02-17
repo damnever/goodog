@@ -1,6 +1,5 @@
 <DOMAIN> {
     goodog {
-        path /
         upstream_tcp <TCP-SERVER>
         upstream_udp <UDP-SERVER>
         connect_timeout 10s

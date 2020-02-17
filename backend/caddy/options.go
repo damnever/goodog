@@ -6,7 +6,6 @@ import (
 )
 
 type Options struct {
-	Path           string        `json:"path"`
 	UpstreamTCP    string        `json:"upstream_tcp"`
 	UpstreamUDP    string        `json:"upstream_udp"`
 	ConnectTimeout time.Duration `json:"connect_timeout"`
@@ -16,7 +15,6 @@ type Options struct {
 
 func (opts *Options) UnmarshalJSON(data []byte) error {
 	var fakeOptions struct {
-		Path           string `json:"path"`
 		UpstreamTCP    string `json:"upstream_tcp"`
 		UpstreamUDP    string `json:"upstream_udp"`
 		ConnectTimeout string `json:"connect_timeout"`
@@ -27,7 +25,6 @@ func (opts *Options) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	opts.Path = fakeOptions.Path
 	opts.UpstreamTCP = fakeOptions.UpstreamTCP
 	opts.UpstreamUDP = fakeOptions.UpstreamUDP
 	// FUCK????
