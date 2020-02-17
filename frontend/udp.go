@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/damnever/goodog/internal/pkg/encoding"
+	ioext "github.com/damnever/libext-go/io"
 	"github.com/golang/snappy"
 	"go.uber.org/zap"
 )
@@ -79,7 +80,6 @@ func (p *udpProxy) handle(ctx context.Context, downstreamAddr net.Addr, data []b
 }
 
 func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr) (io.Writer, error) {
-	// FIXME(damnever): what a fucking mess..
 	addrStr := downstreamAddr.String()
 	p.upmu.RLock()
 	w, ok := p.ups[addrStr]
@@ -88,45 +88,48 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 		return w, nil
 	}
 
-	upreqrPipe, upreqwPipe := io.Pipe()
-	uprespr, err := p.connector.Connect(ctx, upreqrPipe)
+	upstreamRWC, err := p.connector.Connect(ctx)
 	if err != nil {
 		return nil, err
-	}
-	var upreqw io.WriteCloser = upreqwPipe
-	switch p.conf.Compression {
-	case "snappy":
-		upreqw = newSnappyWriterWrapper(upreqwPipe)
-	default:
 	}
 
 	p.upmu.Lock()
 	defer p.upmu.Unlock()
 	if w, ok := p.ups[addrStr]; ok {
-		upreqw.Close()
-		uprespr.Close()
+		upstreamRWC.Close()
 		return w, nil
 	}
-	p.ups[addrStr] = upreqw
+
+	upstream := ioext.WithReadWriter{
+		Reader: upstreamRWC,
+		Writer: upstreamRWC,
+	}
+	switch p.conf.Compression {
+	case "snappy":
+		upstream.Reader = snappy.NewReader(upstreamRWC)
+		snappyw := snappy.NewWriter(upstreamRWC)
+		// defer snappyw.Close() // XXX(damnever): no need to call it
+		upstream.Writer = snappyw
+	default:
+	}
+
+	upstreamWithCloser := ioext.WithCloser{
+		ReadWriter: upstream,
+		Closer:     upstreamRWC,
+	}
+	p.ups[addrStr] = upstreamWithCloser
 
 	go func() {
 		defer func() {
 			p.upmu.Lock()
 			delete(p.ups, addrStr)
 			p.upmu.Unlock()
-			upreqrPipe.Close()
-			uprespr.Close()
+			upstreamWithCloser.Close()
 		}()
 
-		var upstreamr io.Reader = uprespr
-		switch p.conf.Compression {
-		case "snappy":
-			upstreamr = snappy.NewReader(uprespr)
-		default:
-		}
 		buf := make([]byte, math.MaxUint16, math.MaxUint16)
 		for {
-			n, err := encoding.ReadU16SizedBytes(upstreamr, buf)
+			n, err := encoding.ReadU16SizedBytes(upstream, buf)
 			if err != nil {
 				p.logger.Error("read from upstream failed",
 					zap.String("upstream", p.conf.ServerHost()),
@@ -146,26 +149,5 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 			}
 		}
 	}()
-	return upreqw, nil
-}
-
-type snappyWriterWrapper struct {
-	origin  io.WriteCloser
-	snappyw *snappy.Writer
-}
-
-func newSnappyWriterWrapper(origin io.WriteCloser) snappyWriterWrapper {
-	return snappyWriterWrapper{
-		origin:  origin,
-		snappyw: snappy.NewWriter(origin),
-	}
-}
-
-func (w snappyWriterWrapper) Write(p []byte) (int, error) {
-	return w.snappyw.Write(p)
-}
-
-func (w snappyWriterWrapper) Close() error {
-	// multierr.Append(w.snappyw.Close()) // FIXME(damnever): race
-	return w.origin.Close() // XXX: There is no need to close for UDP..
+	return upstreamWithCloser, nil
 }
