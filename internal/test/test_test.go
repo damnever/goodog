@@ -47,12 +47,12 @@ func testWithArgs(t *testing.T, args url.Values) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	t.Log("start tcp and udp server..")
+	fmt.Println("start tcp and udp server..")
 	remoteaddr := findaddr(t)
 	go tcpEchoServer(ctx, remoteaddr, t)
 	go udpEchoServer(ctx, remoteaddr, t)
 
-	t.Log("start backend-caddyv2..")
+	fmt.Println("start backend-caddyv2..")
 	os.Args = []string{"caddy", "run"}
 	go caddycmd.Main()
 	time.Sleep(33 * time.Millisecond)
@@ -65,7 +65,7 @@ func testWithArgs(t *testing.T, args url.Values) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, resp.Status)
 	resp.Body.Close()
 
-	t.Log("start frontend..")
+	fmt.Println("start frontend..")
 	frontendaddr := findaddr(t)
 	proxy, err := frontend.NewProxy(frontend.Config{
 		ListenAddr:         frontendaddr,
@@ -81,7 +81,7 @@ func testWithArgs(t *testing.T, args url.Values) {
 	defer proxy.Close()
 	go proxy.Serve(ctx)
 
-	t.Log("start clients..")
+	fmt.Println("start clients..")
 	time.Sleep(666 * time.Millisecond)
 
 	wg := sync.WaitGroup{}
