@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/damnever/goodog/internal/pkg/encoding"
-	errorsext "github.com/damnever/libext-go/errors"
 	"github.com/golang/snappy"
 	"go.uber.org/zap"
 )
@@ -97,7 +96,7 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 	var upreqw io.WriteCloser = upreqwPipe
 	switch p.conf.Compression {
 	case "snappy":
-		upreqw = newSnappyShortWriter(upreqwPipe)
+		upreqw = newSnappyWriterWrapper(upreqwPipe)
 	default:
 	}
 
@@ -150,29 +149,23 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 	return upreqw, nil
 }
 
-type snappyShortWriter struct {
+type snappyWriterWrapper struct {
 	origin  io.WriteCloser
 	snappyw *snappy.Writer
 }
 
-func newSnappyShortWriter(origin io.WriteCloser) snappyShortWriter {
-	return snappyShortWriter{
+func newSnappyWriterWrapper(origin io.WriteCloser) snappyWriterWrapper {
+	return snappyWriterWrapper{
 		origin:  origin,
 		snappyw: snappy.NewWriter(origin),
 	}
 }
 
-func (w snappyShortWriter) Write(p []byte) (int, error) {
-	n, err := w.snappyw.Write(p)
-	if err == nil {
-		err = w.snappyw.Flush()
-	}
-	return n, err
+func (w snappyWriterWrapper) Write(p []byte) (int, error) {
+	return w.snappyw.Write(p)
 }
 
-func (w snappyShortWriter) Close() error {
-	multierr := &errorsext.MultiErr{}
+func (w snappyWriterWrapper) Close() error {
 	// multierr.Append(w.snappyw.Close()) // FIXME(damnever): race
-	multierr.Append(w.origin.Close()) // XXX: There is no need to close for UDP..
-	return multierr.Err()
+	return w.origin.Close() // XXX: There is no need to close for UDP..
 }

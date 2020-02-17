@@ -9,7 +9,6 @@ import (
 
 	"github.com/damnever/goodog/internal/pkg/encoding"
 	errorsext "github.com/damnever/libext-go/errors"
-	ioext "github.com/damnever/libext-go/io"
 	netext "github.com/damnever/libext-go/net"
 	"go.uber.org/zap"
 )
@@ -68,9 +67,6 @@ func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriter) er
 			if err != nil {
 				errc <- err
 				return
-			}
-			if f, ok := downstream.(ioext.Flusher); ok {
-				f.Flush()
 			}
 		}
 	}()
