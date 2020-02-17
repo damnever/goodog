@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 
+	ioext "github.com/damnever/libext-go/io"
 	netext "github.com/damnever/libext-go/net"
 	"github.com/golang/snappy"
 	"go.uber.org/zap"
@@ -40,34 +41,10 @@ func (p *tcpProxy) Close() error {
 }
 
 func (p *tcpProxy) handle(ctx context.Context, conn net.Conn) {
-	// FIXME(damnever): what a fucking mess..
 	defer conn.Close()
 	downstream := netext.NewTimedConn(conn, p.conf.ReadTimeout, p.conf.WriteTimeout)
 
-	var downstreamReader io.Reader = downstream
-	var reqwriter func()
-	switch p.conf.Compression {
-	case "snappy":
-		r, w := io.Pipe()
-		defer r.Close()
-		downstreamReader = r
-
-		reqwriter = func() {
-			defer w.Close()
-			snappyw := snappy.NewWriter(w)
-			defer snappyw.Close()
-			if _, err := io.Copy(snappyw, downstream); err != nil {
-				p.logger.Error("streaming from downstream to upstream failed",
-					zap.String("upstream", p.conf.ServerHost()),
-					zap.String("downstream", conn.RemoteAddr().String()),
-					zap.Error(err),
-				)
-			}
-		}
-	default:
-	}
-
-	upr, err := p.connector.Connect(ctx, downstreamReader)
+	upstreamRWC, err := p.connector.Connect(ctx)
 	if err != nil {
 		p.logger.Error("connect to upstream failed",
 			zap.String("upstream", p.conf.ServerHost()),
@@ -76,23 +53,38 @@ func (p *tcpProxy) handle(ctx context.Context, conn net.Conn) {
 		)
 		return
 	}
-	defer upr.Close()
+	defer upstreamRWC.Close()
 
-	var upstreamReader io.Reader = upr
+	upstream := ioext.WithReadWriter{
+		Reader: upstreamRWC,
+		Writer: upstreamRWC,
+	}
 	switch p.conf.Compression {
 	case "snappy":
-		upstreamReader = snappy.NewReader(upr)
+		upstream.Reader = snappy.NewReader(upstreamRWC)
+		snappyw := snappy.NewWriter(upstreamRWC)
+		// defer snappyw.Close() // XXX(damnever): no need to call it
+		upstream.Writer = snappyw
 	default:
 	}
 
-	if reqwriter != nil {
-		go reqwriter()
-	}
-	if _, err := io.Copy(downstream, upstreamReader); err != nil {
-		p.logger.Error("streaming from upstream to downstream failed",
+	donec := make(chan struct{}) // NOTE(damnever): fix the unknown data race
+	go func() {
+		if _, err := io.Copy(downstream, upstream); err != nil {
+			p.logger.Error("streaming from upstream to downstream failed",
+				zap.String("upstream", p.conf.ServerHost()),
+				zap.String("downstream", conn.RemoteAddr().String()),
+				zap.Error(err),
+			)
+		}
+		close(donec)
+	}()
+	if _, err := io.Copy(upstream, downstream); err != nil {
+		p.logger.Error("streaming from downstream to upstream failed",
 			zap.String("upstream", p.conf.ServerHost()),
 			zap.String("downstream", conn.RemoteAddr().String()),
 			zap.Error(err),
 		)
 	}
+	<-donec
 }

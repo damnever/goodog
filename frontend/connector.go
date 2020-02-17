@@ -9,13 +9,13 @@ import (
 	"net/http"
 	"time"
 
+	errorsext "github.com/damnever/libext-go/errors"
 	quic "github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/http3"
 )
 
 type Connector interface {
-	// The input io.Reader can be io.PipeReader and CloseWithError(io.EOF)
-	Connect(context.Context, io.Reader) (io.ReadCloser, error)
+	Connect(context.Context) (io.ReadWriteCloser, error)
 	Close() error
 }
 
@@ -43,8 +43,9 @@ func newCaddyHTTP3Connector(serverURL string, insecureSkipVerify bool, timeout t
 	}
 }
 
-func (c *caddyHTTP3Connector) Connect(ctx context.Context, in io.Reader) (io.ReadCloser, error) {
-	req, err := http.NewRequest(http.MethodPost, c.url, in)
+func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, error) {
+	reqr, reqw := io.Pipe()
+	req, err := http.NewRequest(http.MethodPost, c.url, reqr)
 	if err != nil {
 		return nil, err
 	}
@@ -57,15 +58,36 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context, in io.Reader) (io.Rea
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
+		reqr.Close()
 		// Does this apply to http3 lib?
 		io.Copy(ioutil.Discard, resp.Body)
 		resp.Body.Close()
 		return nil, fmt.Errorf("connect failed: %s", resp.Status)
 	}
-	return resp.Body, nil
+	return withReqResp{reqw: reqw, respr: resp.Body}, nil
 }
 
 func (c *caddyHTTP3Connector) Close() error {
 	c.client.CloseIdleConnections()
 	return nil
+}
+
+type withReqResp struct {
+	reqw  *io.PipeWriter
+	respr io.ReadCloser
+}
+
+func (rr withReqResp) Read(p []byte) (int, error) {
+	return rr.respr.Read(p)
+}
+
+func (rr withReqResp) Write(p []byte) (int, error) {
+	return rr.reqw.Write(p)
+}
+
+func (rr withReqResp) Close() error {
+	multierr := &errorsext.MultiErr{}
+	multierr.Append(rr.reqw.Close())
+	multierr.Append(rr.respr.Close())
+	return multierr.Err()
 }
