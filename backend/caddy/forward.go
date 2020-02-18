@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/damnever/goodog/internal/pkg/encoding"
+	bytesext "github.com/damnever/libext-go/bytes"
 	errorsext "github.com/damnever/libext-go/errors"
 	netext "github.com/damnever/libext-go/net"
 	"go.uber.org/zap"
@@ -16,15 +17,19 @@ import (
 type forwarder struct {
 	opts Options
 
-	dialer *net.Dialer
-	logger *zap.Logger
+	dialer         *net.Dialer
+	logger         *zap.Logger
+	copyBufferPool *bytesext.Pool
+	udpBufferPool  *bytesext.Pool
 }
 
 func newForwarder(logger *zap.Logger, opts Options) *forwarder {
 	return &forwarder{
-		opts:   opts,
-		dialer: &net.Dialer{Timeout: opts.ConnectTimeout},
-		logger: logger,
+		opts:           opts,
+		dialer:         &net.Dialer{Timeout: opts.ConnectTimeout},
+		logger:         logger,
+		copyBufferPool: bytesext.NewPoolWith(0, 8192),
+		udpBufferPool:  bytesext.NewPoolWith(0, math.MaxUint16),
 	}
 }
 
@@ -33,14 +38,13 @@ func (f *forwarder) ForwardTCP(ctx context.Context, downstream io.ReadWriter) er
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
 	upstream := netext.NewTimedConn(conn, f.opts.ReadTimeout, f.opts.WriteTimeout)
 
 	errc := make(chan error, 2)
 	go f.stream(downstream, upstream, errc)
 	go f.stream(upstream, downstream, errc)
 
-	return f.wait(ctx, errc, 2)
+	return f.wait(ctx, conn.Close, errc, 2)
 }
 
 func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriter) error {
@@ -55,55 +59,67 @@ func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriter) er
 
 	errc := make(chan error, 2)
 	go func() { // upstream -> downstream
-		buf := make([]byte, math.MaxUint16, math.MaxUint16)
+		buf := f.udpBufferPool.Get(math.MaxUint16)
+		defer f.udpBufferPool.Put(buf)
+		var (
+			n   int
+			err error
+		)
 		for {
 			upstream.SetReadDeadline(time.Now().Add(f.opts.ReadTimeout))
-			n, err := upstream.Read(buf)
-			if err != nil {
-				errc <- err
-				return
+			if n, err = upstream.Read(buf); err != nil {
+				break
 			}
-			err = encoding.WriteU16SizedBytes(downstream, buf[:n])
-			if err != nil {
-				errc <- err
-				return
+
+			if err = encoding.WriteU16SizedBytes(downstream, buf[:n]); err != nil {
+				break
 			}
 		}
+		errc <- err
 	}()
-	go func() {
-		buf := make([]byte, math.MaxUint16, math.MaxUint16)
+	go func() { // downstream -> upstream
+		buf := f.udpBufferPool.Get(math.MaxUint16)
+		defer f.udpBufferPool.Put(buf)
+		var (
+			n   int
+			err error
+		)
 		for {
-			n, err := encoding.ReadU16SizedBytes(downstream, buf)
-			if err != nil {
-				errc <- err
-				return
+			if n, err = encoding.ReadU16SizedBytes(downstream, buf); err != nil {
+				break
 			}
 			upstream.SetWriteDeadline(time.Now().Add(f.opts.WriteTimeout))
 			// NOTE: use of WriteTo with pre-connected connection
-			if _, err := upstream.Write(buf[:n]); err != nil {
-				errc <- err
-				return
+			if _, err = upstream.Write(buf[:n]); err != nil {
+				break
 			}
 		}
+		errc <- err
 	}()
 
-	return f.wait(ctx, errc, 2)
+	return f.wait(ctx, upstream.Close, errc, 2)
 }
 
-func (f *forwarder) wait(ctx context.Context, errc <-chan error, n int) error {
+func (f *forwarder) wait(ctx context.Context, closeFunc func() error, errc <-chan error, n int) error {
+	donec := ctx.Done()
 	multierr := &errorsext.MultiErr{}
-	for i := 0; i < n; i++ {
+	for n > 0 {
 		select {
 		case err := <-errc:
+			n--
 			multierr.Append(err)
-		case <-ctx.Done():
-			return nil
+		case <-donec:
+			donec = nil
+			multierr.Append(closeFunc())
 		}
 	}
+	closeFunc() // N.B.(damnever) call it again to avoid resource leak.
 	return multierr.Err()
 }
 
 func (f *forwarder) stream(dst io.Writer, src io.Reader, errc chan error) {
-	_, err := io.Copy(dst, src)
+	buf := f.copyBufferPool.Get(8192)
+	_, err := io.CopyBuffer(dst, src, buf)
+	f.copyBufferPool.Put(buf)
 	errc <- err
 }

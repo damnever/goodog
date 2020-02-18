@@ -10,8 +10,8 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"github.com/damnever/goodog/internal/pkg/snappypool"
 	ioext "github.com/damnever/libext-go/io"
-	"github.com/golang/snappy"
 	"go.uber.org/zap"
 )
 
@@ -119,10 +119,14 @@ func (g *GoodogCaddyAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 	}
 	switch strings.ToLower(args.Get("compression")) {
 	case "snappy":
-		rw.Reader = snappy.NewReader(r.Body)
-		snappyw := snappy.NewWriter(w)
-		defer snappyw.Close()
+		snappyr := snappypool.GetReader(r.Body)
+		rw.Reader = snappyr
+		snappyw := snappypool.GetWriter(w)
 		rw.Writer = snappyw
+		defer func() {
+			snappypool.PutReader(snappyr)
+			snappypool.PutWriter(snappyw)
+		}()
 	default:
 	}
 

@@ -18,32 +18,17 @@ import (
 	"time"
 
 	caddycmd "github.com/caddyserver/caddy/v2/cmd"
+	_ "github.com/caddyserver/caddy/v2/modules/standard" // Plug in Caddy module
+	_ "github.com/damnever/goodog/backend/caddy"         // Plug in Caddy module
 	"github.com/damnever/goodog/frontend"
 	randext "github.com/damnever/libext-go/rand"
 	"github.com/stretchr/testify/require"
-
-	// Plug in Caddy modules here
-	_ "github.com/caddyserver/caddy/v2/modules/standard"
-	_ "github.com/damnever/goodog/backend/caddy"
+	"go.uber.org/goleak"
 )
 
 func TestGoodog(t *testing.T) {
-	t.Run("no-compression", func(subt *testing.T) {
-		testWithArgs(subt, url.Values{
-			"version": []string{"v1"},
-		})
-	})
-	time.Sleep(555 * time.Millisecond)
+	defer goleak.VerifyNone(t)
 
-	t.Run("snappy-compression", func(subt *testing.T) {
-		testWithArgs(subt, url.Values{
-			"version":     []string{"v1"},
-			"compression": []string{"snappy"},
-		})
-	})
-}
-
-func testWithArgs(t *testing.T, args url.Values) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -65,6 +50,27 @@ func testWithArgs(t *testing.T, args url.Values) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, resp.Status)
 	resp.Body.Close()
 
+	t.Run("no-compression", func(subt *testing.T) {
+		testWithArgs(ctx, subt, backendaddr, url.Values{
+			"version": []string{"v1"},
+		})
+	})
+
+	t.Run("snappy-compression", func(subt *testing.T) {
+		testWithArgs(ctx, subt, backendaddr, url.Values{
+			"version":     []string{"v1"},
+			"compression": []string{"snappy"},
+		})
+	})
+
+	os.Args = []string{"caddy", "stop"}
+	caddycmd.Main()
+}
+
+func testWithArgs(ctx context.Context, t *testing.T, backendaddr string, args url.Values) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	fmt.Println("start frontend..")
 	frontendaddr := findaddr(t)
 	proxy, err := frontend.NewProxy(frontend.Config{
@@ -82,7 +88,7 @@ func testWithArgs(t *testing.T, args url.Values) {
 	go proxy.Serve(ctx)
 
 	fmt.Println("start clients..")
-	time.Sleep(666 * time.Millisecond)
+	time.Sleep(333 * time.Millisecond)
 
 	wg := sync.WaitGroup{}
 	for i := 0; i < 22; i++ {

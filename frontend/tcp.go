@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 
+	"github.com/damnever/goodog/internal/pkg/snappypool"
+	bytesext "github.com/damnever/libext-go/bytes"
 	ioext "github.com/damnever/libext-go/io"
 	netext "github.com/damnever/libext-go/net"
 	"github.com/golang/snappy"
@@ -16,6 +18,7 @@ type tcpProxy struct {
 	logger    *zap.Logger
 	connector Connector
 	server    *netext.Server
+	pool      *bytesext.Pool
 }
 
 func newTCPProxy(conf Config, connector Connector, logger *zap.Logger) (*tcpProxy, error) {
@@ -23,6 +26,7 @@ func newTCPProxy(conf Config, connector Connector, logger *zap.Logger) (*tcpProx
 		conf:      conf,
 		logger:    logger.Named("tcp"),
 		connector: connector,
+		pool:      bytesext.NewPoolWith(0, 8192),
 	}
 	server, err := netext.NewTCPServer(conf.ListenAddr, p.handle)
 	if err != nil {
@@ -61,30 +65,51 @@ func (p *tcpProxy) handle(ctx context.Context, conn net.Conn) {
 	}
 	switch p.conf.Compression {
 	case "snappy":
-		upstream.Reader = snappy.NewReader(upstreamRWC)
-		snappyw := snappy.NewWriter(upstreamRWC)
+		upstream.Reader = snappypool.GetReader(upstreamRWC)
+		upstream.Writer = snappypool.GetWriter(upstreamRWC)
 		// defer snappyw.Close() // XXX(damnever): no need to call it
-		upstream.Writer = snappyw
 	default:
 	}
 
-	donec := make(chan struct{}) // NOTE(damnever): fix the unknown data race
+	waitc := make(chan struct{}) // NOTE(damnever): fix the unknown data race
 	go func() {
-		if _, err := io.Copy(downstream, upstream); err != nil {
+		buf := p.pool.Get(8192)
+		defer p.pool.Put(buf)
+
+		if _, err := io.CopyBuffer(downstream, upstream, buf); err != nil {
 			p.logger.Error("streaming from upstream to downstream failed",
 				zap.String("upstream", p.conf.ServerHost()),
 				zap.String("downstream", conn.RemoteAddr().String()),
 				zap.Error(err),
 			)
 		}
-		close(donec)
+		close(waitc)
 	}()
-	if _, err := io.Copy(upstream, downstream); err != nil {
+
+	buf := p.pool.Get(8192)
+	defer func() {
+		p.pool.Put(buf)
+
+		if snappyr, ok := upstream.Reader.(*snappy.Reader); ok {
+			snappypool.PutReader(snappyr)
+		}
+		if snappyw, ok := upstream.Writer.(*snappy.Writer); ok {
+			snappypool.PutWriter(snappyw)
+		}
+	}()
+	if _, err := io.CopyBuffer(upstream, downstream, buf); err != nil {
 		p.logger.Error("streaming from downstream to upstream failed",
 			zap.String("upstream", p.conf.ServerHost()),
 			zap.String("downstream", conn.RemoteAddr().String()),
 			zap.Error(err),
 		)
 	}
-	<-donec
+
+	select {
+	case <-ctx.Done():
+		conn.Close()
+		<-waitc
+	case <-waitc:
+		return
+	}
 }

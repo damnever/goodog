@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	"github.com/damnever/goodog/internal/pkg/encoding"
+	"github.com/damnever/goodog/internal/pkg/snappypool"
+	bytesext "github.com/damnever/libext-go/bytes"
 	ioext "github.com/damnever/libext-go/io"
 	"github.com/golang/snappy"
 	"go.uber.org/zap"
@@ -19,6 +21,7 @@ type udpProxy struct {
 
 	conn      net.PacketConn
 	connector Connector
+	pool      *bytesext.Pool
 
 	upmu sync.RWMutex
 	ups  map[string]io.WriteCloser
@@ -34,6 +37,7 @@ func newUDPProxy(conf Config, connector Connector, logger *zap.Logger) (*udpProx
 		logger:    logger.Named("udp"),
 		conn:      conn,
 		connector: connector,
+		pool:      bytesext.NewPoolWith(0, math.MaxUint16),
 		ups:       map[string]io.WriteCloser{},
 	}, nil
 }
@@ -54,9 +58,10 @@ func (p *udpProxy) Serve(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		data := make([]byte, n, n)
-		copy(data, buf[:n])
-		p.handle(ctx, addr, data)
+		// NOTE(damnever): here assumes the underlying writer will make a copy of it.
+		// data := make([]byte, n, n)
+		// copy(data, buf[:n])
+		p.handle(ctx, addr, buf[:n])
 	}
 }
 
@@ -106,9 +111,9 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 	}
 	switch p.conf.Compression {
 	case "snappy":
-		upstream.Reader = snappy.NewReader(upstreamRWC)
-		snappyw := snappy.NewWriter(upstreamRWC)
-		// defer snappyw.Close() // XXX(damnever): no need to call it
+		snappyr := snappypool.GetReader(upstreamRWC)
+		upstream.Reader = snappyr
+		snappyw := snappypool.GetWriter(upstreamRWC)
 		upstream.Writer = snappyw
 	default:
 	}
@@ -120,14 +125,22 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 	p.ups[addrStr] = upstreamWithCloser
 
 	go func() {
+		buf := p.pool.Get(math.MaxUint16)
 		defer func() {
+			p.pool.Put(buf)
+
 			p.upmu.Lock()
 			delete(p.ups, addrStr)
 			p.upmu.Unlock()
 			upstreamWithCloser.Close()
+			if snappyr, ok := upstream.Reader.(*snappy.Reader); ok {
+				snappypool.PutReader(snappyr)
+			}
+			if snappyw, ok := upstream.Writer.(*snappy.Writer); ok {
+				snappypool.PutWriter(snappyw)
+			}
 		}()
 
-		buf := make([]byte, math.MaxUint16, math.MaxUint16)
 		for {
 			n, err := encoding.ReadU16SizedBytes(upstream, buf)
 			if err != nil {
