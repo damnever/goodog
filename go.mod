@@ -9,5 +9,6 @@ require (
 	github.com/lucas-clemente/quic-go v0.14.1
 	github.com/mattn/go-isatty v0.0.4
 	github.com/stretchr/testify v1.4.0
+	go.uber.org/goleak v1.0.0
 	go.uber.org/zap v1.10.0
 )
