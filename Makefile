@@ -18,6 +18,20 @@ build:  ## Build executable files. (Args: GOOS=$(go env GOOS) GOARCH=$(go env GO
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o 'bin/goodog-backend-caddy' $(LDFLAGS) ./cmd/backend/caddy/
 
 
+REG ?= "docker.pkg.github.com/damnever"
+TAG ?= "latest"
+TZ ?= "Asia/Shanghai"
+
+docker-image:  ## Build docker image. (Args: REG=docker.pkg.github.com/damnever TAG=latest TZ=Asia/Shanghai)
+	docker build --target goodog-frontend --build-arg TZ=$(TZ) --tag goodog-frontend:$(TAG) -f Dockerfile .
+	docker build --target goodog-backend-caddy --build-arg TZ=$(TZ) --tag goodog-backend-caddy:$(TAG) -f Dockerfile .
+	env TAG=$(TAG) docker tag $(shell docker images goodog-frontend:${TAG} --format "{{.ID}}") $(REG)/goodog/goodog-frontend:$(TAG)
+	env TAG=$(TAG) docker tag $(shell docker images goodog-backend-caddy:${TAG} --format "{{.ID}}") $(REG)/goodog/goodog-backend-caddy:$(TAG)
+	# docker push $(REG)/goodog-frontend:$(TAG)
+	# docker push $(REG)/goodog-backend-caddy:$(TAG)
+
+
+
 GOLANGCI_LINT_VERSION ?= "latest"
 
 test:  ## Run test cases. (Args: GOLANGCI_LINT_VERSION=latest)
@@ -32,8 +46,6 @@ test:  ## Run test cases. (Args: GOLANGCI_LINT_VERSION=latest)
 	go test -v -race -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out  # -o coverage.html
 
-
-deps: export GOPRIVATE=github.com/damnever/libext-go  # DO NOT use quotes
 
 deps: ## Update dependencies.
 	go mod verify
