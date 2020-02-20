@@ -45,11 +45,10 @@ func newCaddyHTTP3Connector(serverURL string, insecureSkipVerify bool, timeout t
 
 func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, error) {
 	reqr, reqw := io.Pipe()
-	req, err := http.NewRequest(http.MethodPost, c.url, reqr)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, reqr)
 	if err != nil {
 		return nil, err
 	}
-	req = req.WithContext(ctx)
 	req.Header.Set("Transfer-Encoding", "chunked")
 	req.Header.Set("User-Agent", "goodog/frontend")
 

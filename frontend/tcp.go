@@ -5,11 +5,8 @@ import (
 	"io"
 	"net"
 
-	"github.com/damnever/goodog/internal/pkg/snappypool"
 	bytesext "github.com/damnever/libext-go/bytes"
-	ioext "github.com/damnever/libext-go/io"
 	netext "github.com/damnever/libext-go/net"
-	"github.com/golang/snappy"
 	"go.uber.org/zap"
 )
 
@@ -48,7 +45,7 @@ func (p *tcpProxy) handle(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	downstream := netext.NewTimedConn(conn, p.conf.ReadTimeout, p.conf.WriteTimeout)
 
-	upstreamRWC, err := p.connector.Connect(ctx)
+	upstream, err := p.connector.Connect(ctx)
 	if err != nil {
 		p.logger.Error("connect to upstream failed",
 			zap.String("upstream", p.conf.ServerHost()),
@@ -57,19 +54,8 @@ func (p *tcpProxy) handle(ctx context.Context, conn net.Conn) {
 		)
 		return
 	}
-	defer upstreamRWC.Close()
-
-	upstream := ioext.WithReadWriter{
-		Reader: upstreamRWC,
-		Writer: upstreamRWC,
-	}
-	switch p.conf.Compression {
-	case "snappy":
-		upstream.Reader = snappypool.GetReader(upstreamRWC)
-		upstream.Writer = snappypool.GetWriter(upstreamRWC)
-		// defer snappyw.Close() // XXX(damnever): no need to call it
-	default:
-	}
+	defer upstream.Close()
+	upstream = tryWrapWithCompression(upstream, p.conf.Compression)
 
 	waitc := make(chan struct{}) // NOTE(damnever): fix the unknown data race
 	go func() {
@@ -87,16 +73,8 @@ func (p *tcpProxy) handle(ctx context.Context, conn net.Conn) {
 	}()
 
 	buf := p.pool.Get(8192)
-	defer func() {
-		p.pool.Put(buf)
+	defer p.pool.Put(buf)
 
-		if snappyr, ok := upstream.Reader.(*snappy.Reader); ok {
-			snappypool.PutReader(snappyr)
-		}
-		if snappyw, ok := upstream.Writer.(*snappy.Writer); ok {
-			snappypool.PutWriter(snappyw)
-		}
-	}()
 	if _, err := io.CopyBuffer(upstream, downstream, buf); err != nil {
 		p.logger.Error("streaming from downstream to upstream failed",
 			zap.String("upstream", p.conf.ServerHost()),

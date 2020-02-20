@@ -8,10 +8,7 @@ import (
 	"sync"
 
 	"github.com/damnever/goodog/internal/pkg/encoding"
-	"github.com/damnever/goodog/internal/pkg/snappypool"
 	bytesext "github.com/damnever/libext-go/bytes"
-	ioext "github.com/damnever/libext-go/io"
-	"github.com/golang/snappy"
 	"go.uber.org/zap"
 )
 
@@ -93,7 +90,7 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 		return w, nil
 	}
 
-	upstreamRWC, err := p.connector.Connect(ctx)
+	upstream, err := p.connector.Connect(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -101,28 +98,11 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 	p.upmu.Lock()
 	defer p.upmu.Unlock()
 	if w, ok := p.ups[addrStr]; ok {
-		upstreamRWC.Close()
+		upstream.Close()
 		return w, nil
 	}
-
-	upstream := ioext.WithReadWriter{
-		Reader: upstreamRWC,
-		Writer: upstreamRWC,
-	}
-	switch p.conf.Compression {
-	case "snappy":
-		snappyr := snappypool.GetReader(upstreamRWC)
-		upstream.Reader = snappyr
-		snappyw := snappypool.GetWriter(upstreamRWC)
-		upstream.Writer = snappyw
-	default:
-	}
-
-	upstreamWithCloser := ioext.WithCloser{
-		ReadWriter: upstream,
-		Closer:     upstreamRWC,
-	}
-	p.ups[addrStr] = upstreamWithCloser
+	upstream = tryWrapWithSafeCompression(upstream, p.conf.Compression)
+	p.ups[addrStr] = upstream
 
 	go func() {
 		buf := p.pool.Get(math.MaxUint16)
@@ -132,13 +112,7 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 			p.upmu.Lock()
 			delete(p.ups, addrStr)
 			p.upmu.Unlock()
-			upstreamWithCloser.Close()
-			if snappyr, ok := upstream.Reader.(*snappy.Reader); ok {
-				snappypool.PutReader(snappyr)
-			}
-			if snappyw, ok := upstream.Writer.(*snappy.Writer); ok {
-				snappypool.PutWriter(snappyw)
-			}
+			upstream.Close()
 		}()
 
 		for {
@@ -162,5 +136,5 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 			}
 		}
 	}()
-	return upstreamWithCloser, nil
+	return upstream, nil
 }
