@@ -18,17 +18,20 @@ build:  ## Build executable files. (Args: GOOS=$(go env GOOS) GOARCH=$(go env GO
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o 'bin/goodog-backend-caddy' $(LDFLAGS) ./cmd/backend/caddy/
 
 
-REG ?= "docker.pkg.github.com/damnever"
+REG ?= "docker.io"
 TAG ?= "latest"
 TZ ?= "Asia/Shanghai"
 
-docker-image:  ## Build docker image. (Args: REG=docker.pkg.github.com/damnever TAG=latest TZ=Asia/Shanghai)
-	docker build --target goodog-frontend --build-arg TZ=$(TZ) --tag goodog-frontend:$(TAG) -f Dockerfile .
-	docker build --target goodog-backend-caddy --build-arg TZ=$(TZ) --tag goodog-backend-caddy:$(TAG) -f Dockerfile .
-	env TAG=$(TAG) docker tag $(shell docker images goodog-frontend:${TAG} --format "{{.ID}}") $(REG)/goodog/goodog-frontend:$(TAG)
-	env TAG=$(TAG) docker tag $(shell docker images goodog-backend-caddy:${TAG} --format "{{.ID}}") $(REG)/goodog/goodog-backend-caddy:$(TAG)
-	# docker push $(REG)/goodog-frontend:$(TAG)
-	# docker push $(REG)/goodog-backend-caddy:$(TAG)
+docker-image:  ## Build docker image. (Args: REG=docker.io TAG=latest TZ=Asia/Shanghai)
+	docker build --target goodog-frontend --build-arg TZ=$(TZ) --tag goodog/goodog-frontend:$(TAG) -f Dockerfile .
+	docker build --target goodog-backend-caddy --build-arg TZ=$(TZ) --tag goodog/goodog-backend-caddy:$(TAG) -f Dockerfile .
+	# GitHub docker registry is fucking awful..
+	# FRONTEND_TAG=$(shell docker images goodog/goodog-frontend:$(TAG) --format "{{.ID}}"); \
+		docker tag $${FRONTEND_TAG} $(REG)/goodog/goodog-frontend:$(TAG)
+	# BACKEND_TAG=$(shell docker images goodog/goodog-backend-caddy:$(TAG) --format "{{.ID}}"); \
+		docker tag $${BACKEND_TAG} $(REG)/goodog/goodog-backend-caddy:$(TAG)
+	docker push $(REG)/goodog/goodog-frontend:$(TAG)
+	docker push $(REG)/goodog/goodog-backend-caddy:$(TAG)
 
 
 
