@@ -9,8 +9,8 @@ GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 NOW = $(shell date '+%Y-%m-%d')
 REV = $(shell git rev-parse --short HEAD || echo unknown)
-LDFLAGS = -ldflags '-X github.com/damnever/goodog.GitRev=$(REV) \
-		-X github.com/damnever/goodog.BuildDate=$(NOW)'
+LDFLAGS = -ldflags '-X github.com/damnever/goodog.gitSHA=$(REV) \
+		-X github.com/damnever/goodog.buildDate=$(NOW)'
 
 
 build:  ## Build executable files. (Args: GOOS=$(go env GOOS) GOARCH=$(go env GOARCH))
