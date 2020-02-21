@@ -19,7 +19,8 @@ ENV GOODOG_CONNECT_TIMEOUT 5s
 ENV GOODOG_READ_TIMEOUT 1m
 ENV GOODOG_WRITE_TIMEOUT 3s
 ENV GOODOG_LOG_LEVEL info
-EXPOSE 59487
+EXPOSE 59487/tcp
+EXPOSE 59487/udp
 CMD ["sh", "-c", \
      "goodog-frontend \
      -server ${GOODOG_SERVER_URI:=:invalid:} \
@@ -38,7 +39,8 @@ COPY --from=builder /goodog/bin/goodog-backend-caddy /usr/bin/goodog-backend-cad
 ARG TZ
 ENV TZ $TZ
 EXPOSE 80
-EXPOSE 443
+EXPOSE 443/tcp
+EXPOSE 443/udp
 EXPOSE 2019
 ENTRYPOINT ["goodog-backend-caddy"]
 CMD ["run"]
