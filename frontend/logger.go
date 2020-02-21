@@ -24,13 +24,17 @@ var (
 
 func init() {
 	fd := os.Stdout.Fd()
-	var err error
+	var config zap.Config
 	if isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd) {
-		DefaultLogger, err = zap.NewDevelopment()
+		config = zap.NewDevelopmentConfig()
 	} else {
-		DefaultLogger, err = zap.NewProduction()
+		config = zap.NewProductionConfig()
 	}
-	if err != nil {
+	config.OutputPaths = []string{"stdout"}
+	config.ErrorOutputPaths = []string{"stdout"}
+
+	var err error
+	if DefaultLogger, err = config.Build(); err != nil {
 		panic(err)
 	}
 }
