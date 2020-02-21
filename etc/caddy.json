@@ -5,21 +5,44 @@
     "config": { "persist": true }
   },
   "apps": {
+    "tls": {
+      "automation": {
+        "policies": [{
+          "hosts": [ "<DOMAIN>" ],
+          "management": {
+            "module": "acme",
+            "email": "<ACME-EMAIL>",
+            "renew_ahead": "720h",
+            "acme_timeout": "300s",
+            "on_demand": false
+          },
+          "manage_sync": false
+        }]
+      }
+    },
     "http": {
+      "grace_period": "3s",
       "servers": {
         "goodog": {
+          "listen": [":443"],
+          "logs": { },
           "automatic_https": {
             "disable": false,
             "disable_redirects": true
           },
+          "tls_connection_policies": [{}],
           "experimental_http3": true,
-          "listen": ["<DOMAIN>"],
           "read_timeout": "30s",
           "read_header_timeout": "5s",
           "write_timeout": "5s",
           "routes": [
             {
-              "match": [ {"path": ["/"]} ],
+              "match": [
+                {
+                  "host": ["<DOMAIN>"],
+                  "path": ["/"]
+                }
+              ],
               "handle": [
                 {
                   "handler": "authentication",
@@ -35,12 +58,6 @@
                         }
                       ]
                     }
-                  }
-                },
-                {
-                  "handler": "headers",
-                  "response": {
-                    "set": { "Server": ["TEST"] }
                   }
                 },
                 {
