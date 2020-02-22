@@ -79,9 +79,7 @@ func testWithArgs(ctx context.Context, t *testing.T, backendaddr string, args ur
 		Connector:          "caddy-http3",
 		LogLevel:           "debug",
 		InsecureSkipVerify: true,
-		ConnectTimeout:     5 * time.Second,
-		ReadTimeout:        30 * time.Second,
-		WriteTimeout:       5 * time.Second,
+		Timeout:            30 * time.Second,
 	})
 	require.Nil(t, err)
 	defer proxy.Close()
