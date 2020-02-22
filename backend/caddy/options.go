@@ -9,8 +9,7 @@ type Options struct {
 	UpstreamTCP    string        `json:"upstream_tcp"`
 	UpstreamUDP    string        `json:"upstream_udp"`
 	ConnectTimeout time.Duration `json:"connect_timeout"`
-	ReadTimeout    time.Duration `json:"read_timeout"`
-	WriteTimeout   time.Duration `json:"write_timeout"`
+	Timeout        time.Duration `json:"timeout"`
 }
 
 func (opts *Options) UnmarshalJSON(data []byte) error {
@@ -18,8 +17,7 @@ func (opts *Options) UnmarshalJSON(data []byte) error {
 		UpstreamTCP    string `json:"upstream_tcp"`
 		UpstreamUDP    string `json:"upstream_udp"`
 		ConnectTimeout string `json:"connect_timeout"`
-		ReadTimeout    string `json:"read_timeout"`
-		WriteTimeout   string `json:"write_timeout"`
+		Timeout        string `json:"timeout"`
 	}
 	if err := json.Unmarshal(data, &fakeOptions); err != nil {
 		return err
@@ -33,16 +31,11 @@ func (opts *Options) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	opts.ConnectTimeout = d
-	d, err = time.ParseDuration(fakeOptions.ReadTimeout)
+	d, err = time.ParseDuration(fakeOptions.Timeout)
 	if err != nil {
 		return err
 	}
-	opts.ReadTimeout = d
-	d, err = time.ParseDuration(fakeOptions.WriteTimeout)
-	if err != nil {
-		return err
-	}
-	opts.WriteTimeout = d
+	opts.Timeout = d
 	return nil
 }
 
@@ -50,10 +43,7 @@ func (opts *Options) withDefaults() {
 	if opts.ConnectTimeout <= 0 {
 		opts.ConnectTimeout = 3 * time.Second
 	}
-	if opts.ReadTimeout <= 0 {
-		opts.ReadTimeout = 1 * time.Minute
-	}
-	if opts.WriteTimeout <= 0 {
-		opts.WriteTimeout = 5 * time.Second
+	if opts.Timeout <= 0 {
+		opts.Timeout = 1 * time.Minute
 	}
 }

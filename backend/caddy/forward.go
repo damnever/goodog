@@ -5,12 +5,10 @@ import (
 	"io"
 	"math"
 	"net"
-	"time"
 
 	"github.com/damnever/goodog/internal/pkg/encoding"
 	bytesext "github.com/damnever/libext-go/bytes"
 	errorsext "github.com/damnever/libext-go/errors"
-	netext "github.com/damnever/libext-go/net"
 	"go.uber.org/zap"
 )
 
@@ -33,27 +31,29 @@ func newForwarder(logger *zap.Logger, opts Options) *forwarder {
 	}
 }
 
-func (f *forwarder) ForwardTCP(ctx context.Context, downstream io.ReadWriter) error {
-	conn, err := f.dialer.DialContext(ctx, "tcp", f.opts.UpstreamTCP)
+func (f *forwarder) ForwardTCP(ctx context.Context, downstream io.ReadWriteCloser) error {
+	upstream, err := f.dialer.DialContext(ctx, "tcp", f.opts.UpstreamTCP)
 	if err != nil {
+		downstream.Close()
 		return err
 	}
-	upstream := netext.NewTimedConn(conn, f.opts.ReadTimeout, f.opts.WriteTimeout)
 
 	errc := make(chan error, 2)
 	go f.stream(downstream, upstream, errc)
 	go f.stream(upstream, downstream, errc)
 
-	return f.wait(ctx, conn.Close, errc, 2)
+	return f.wait(ctx, upstream.Close, downstream.Close, errc, 2)
 }
 
-func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriter) error {
+func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriteCloser) error {
 	upstreamAddr, err := net.ResolveUDPAddr("udp", f.opts.UpstreamUDP)
 	if err != nil {
+		downstream.Close()
 		return err
 	}
 	upstream, err := net.DialUDP("udp", nil, upstreamAddr)
 	if err != nil {
+		downstream.Close()
 		return err
 	}
 
@@ -66,7 +66,6 @@ func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriter) er
 			err error
 		)
 		for {
-			upstream.SetReadDeadline(time.Now().Add(f.opts.ReadTimeout))
 			if n, err = upstream.Read(buf); err != nil {
 				break
 			}
@@ -88,7 +87,6 @@ func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriter) er
 			if n, err = encoding.ReadU16SizedBytes(downstream, buf); err != nil {
 				break
 			}
-			upstream.SetWriteDeadline(time.Now().Add(f.opts.WriteTimeout))
 			// NOTE: use of WriteTo with pre-connected connection
 			if _, err = upstream.Write(buf[:n]); err != nil {
 				break
@@ -97,12 +95,13 @@ func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriter) er
 		errc <- err
 	}()
 
-	return f.wait(ctx, upstream.Close, errc, 2)
+	return f.wait(ctx, upstream.Close, downstream.Close, errc, 2)
 }
 
-func (f *forwarder) wait(ctx context.Context, closeFunc func() error, errc <-chan error, n int) error {
+func (f *forwarder) wait(ctx context.Context, upCloseFunc, downCloseFunc func() error, errc <-chan error, n int) error {
 	donec := ctx.Done()
 	multierr := &errorsext.MultiErr{}
+	closed := false
 	for n > 0 {
 		select {
 		case err := <-errc:
@@ -110,10 +109,17 @@ func (f *forwarder) wait(ctx context.Context, closeFunc func() error, errc <-cha
 			multierr.Append(err)
 		case <-donec:
 			donec = nil
-			multierr.Append(closeFunc())
+		}
+		if !closed {
+			closed = true
+			upCloseFunc()
+			downCloseFunc()
 		}
 	}
-	closeFunc() // N.B.(damnever) call it again to avoid resource leak.
+	if !closed {
+		upCloseFunc()
+		downCloseFunc()
+	}
 	return multierr.Err()
 }
 

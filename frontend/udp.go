@@ -9,6 +9,7 @@ import (
 
 	"github.com/damnever/goodog/internal/pkg/encoding"
 	bytesext "github.com/damnever/libext-go/bytes"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -20,8 +21,9 @@ type udpProxy struct {
 	connector Connector
 	pool      *bytesext.Pool
 
-	upmu sync.RWMutex
-	ups  map[string]io.WriteCloser
+	upmu    sync.RWMutex
+	ups     map[string]io.WriteCloser
+	streams atomic.Uint32
 }
 
 func newUDPProxy(conf Config, connector Connector, logger *zap.Logger) (*udpProxy, error) {
@@ -34,7 +36,7 @@ func newUDPProxy(conf Config, connector Connector, logger *zap.Logger) (*udpProx
 		logger:    logger.Named("udp"),
 		conn:      conn,
 		connector: connector,
-		pool:      bytesext.NewPoolWith(0, math.MaxUint16),
+		pool:      bytesext.NewPoolWith(7, 512), // Max: math.MaxUint16
 		ups:       map[string]io.WriteCloser{},
 	}, nil
 }
@@ -55,15 +57,19 @@ func (p *udpProxy) Serve(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		// NOTE(damnever): here assumes the underlying writer will make a copy of it.
-		// data := make([]byte, n, n)
-		// copy(data, buf[:n])
-		p.handle(ctx, addr, buf[:n])
+
+		data := p.pool.Get(n)
+		copy(data, buf[:n])
+		go func(data []byte) {
+			// FIXME(damnever): resuse this goroutine
+			p.handle(ctx, addr, data)
+			p.pool.Put(data)
+		}(data)
 	}
 }
 
 func (p *udpProxy) handle(ctx context.Context, downstreamAddr net.Addr, data []byte) {
-	reqw, err := p.getRemoteWriter(ctx, downstreamAddr)
+	upstream, err := p.getRemoteWriter(ctx, downstreamAddr)
 	if err != nil {
 		p.logger.Error("connect to upstream failed",
 			zap.String("upstream", p.conf.ServerHost()),
@@ -72,16 +78,25 @@ func (p *udpProxy) handle(ctx context.Context, downstreamAddr net.Addr, data []b
 		)
 		return
 	}
-	if err := encoding.WriteU16SizedBytes(reqw, data); err != nil {
-		p.logger.Error("write to upstream failed",
-			zap.String("upstream", p.conf.ServerHost()),
-			zap.String("downstream", downstreamAddr.String()),
-			zap.Error(err),
-		)
+
+	err = encoding.WriteU16SizedBytes(upstream, data)
+	logf := p.logger.Info
+	if err != nil {
+		upstream.Close()
+		p.upmu.Lock()
+		delete(p.ups, downstreamAddr.String())
+		p.upmu.Unlock()
+
+		logf = p.logger.Warn
 	}
+	logf("downstream->upstream done",
+		zap.String("upstream", p.conf.ServerHost()),
+		zap.String("downstream", downstreamAddr.String()),
+		zap.Error(err),
+	)
 }
 
-func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr) (io.Writer, error) {
+func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr) (io.WriteCloser, error) {
 	addrStr := downstreamAddr.String()
 	p.upmu.RLock()
 	w, ok := p.ups[addrStr]
@@ -101,40 +116,51 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 		upstream.Close()
 		return w, nil
 	}
-	upstream = tryWrapWithSafeCompression(upstream, p.conf.Compression)
+	upstream = tryWrapWithCompression(upstream, p.conf.Compression)
 	p.ups[addrStr] = upstream
 
+	p.logger.Info("+stream",
+		zap.Uint32("streams", p.streams.Inc()),
+		zap.String("upstream", p.conf.ServerHost()),
+		zap.String("downstream", addrStr),
+	)
 	go func() {
-		buf := p.pool.Get(math.MaxUint16)
-		defer func() {
-			p.pool.Put(buf)
-
-			p.upmu.Lock()
-			delete(p.ups, addrStr)
-			p.upmu.Unlock()
-			upstream.Close()
-		}()
-
+		var (
+			n   int
+			err error
+			buf = p.pool.Get(math.MaxUint16)
+		)
 		for {
-			n, err := encoding.ReadU16SizedBytes(upstream, buf)
-			if err != nil {
-				p.logger.Error("read from upstream failed",
-					zap.String("upstream", p.conf.ServerHost()),
-					zap.String("downstream", downstreamAddr.String()),
-					zap.Error(err),
-				)
-				return
-			}
 			// TODO: timeout??
-			if _, err := p.conn.WriteTo(buf[:n], downstreamAddr); err != nil {
-				p.logger.Error("write to downstream failed",
-					zap.String("upstream", p.conf.ServerHost()),
-					zap.String("downstream", downstreamAddr.String()),
-					zap.Error(err),
-				)
-				return
+			n, err = encoding.ReadU16SizedBytes(upstream, buf)
+			if err != nil {
+				break
+			}
+			if _, err = p.conn.WriteTo(buf[:n], downstreamAddr); err != nil {
+				break
 			}
 		}
+		p.pool.Put(buf)
+
+		p.upmu.Lock()
+		delete(p.ups, addrStr)
+		p.upmu.Unlock()
+		upstream.Close()
+
+		logf := p.logger.Info
+		if err != nil {
+			logf = p.logger.Warn
+		}
+		logf("upstream->downstream done",
+			zap.String("upstream", p.conf.ServerHost()),
+			zap.String("downstream", downstreamAddr.String()),
+			zap.Error(err),
+		)
+		p.logger.Info("-stream",
+			zap.Uint32("streams", p.streams.Dec()),
+			zap.String("upstream", p.conf.ServerHost()),
+			zap.String("downstream", addrStr),
+		)
 	}()
 	return upstream, nil
 }

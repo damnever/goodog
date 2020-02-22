@@ -16,8 +16,7 @@ type Config struct {
 	LogLevel           string
 	InsecureSkipVerify bool // This is for testing purpose.
 	ConnectTimeout     time.Duration
-	ReadTimeout        time.Duration
-	WriteTimeout       time.Duration
+	Timeout            time.Duration
 
 	Compression string
 	serverURL   *url.URL
@@ -69,12 +68,12 @@ func NewProxy(conf Config) (*Proxy, error) {
 	}
 	setDefaultLogLevel(conf.LogLevel)
 
-	tcpconnector := newCaddyHTTP3Connector(conf.makeURI("tcp"), conf.InsecureSkipVerify, conf.ReadTimeout)
+	tcpconnector := newCaddyHTTP3Connector(conf.makeURI("tcp"), conf.InsecureSkipVerify, conf.Timeout)
 	tcpserver, err := newTCPProxy(conf, tcpconnector, DefaultLogger)
 	if err != nil {
 		return nil, err
 	}
-	udpconnector := newCaddyHTTP3Connector(conf.makeURI("udp"), conf.InsecureSkipVerify, conf.ReadTimeout)
+	udpconnector := newCaddyHTTP3Connector(conf.makeURI("udp"), conf.InsecureSkipVerify, conf.Timeout)
 	udpserver, err := newUDPProxy(conf, udpconnector, DefaultLogger)
 	if err != nil {
 		tcpserver.Close()

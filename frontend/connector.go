@@ -7,9 +7,9 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"sync"
 	"time"
 
-	errorsext "github.com/damnever/libext-go/errors"
 	quic "github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/http3"
 )
@@ -49,7 +49,7 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Transfer-Encoding", "chunked")
+	// req.Header.Set("Transfer-Encoding", "chunked")
 	req.Header.Set("User-Agent", "goodog/frontend")
 
 	resp, err := c.client.Do(req)
@@ -58,12 +58,11 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, 
 	}
 	if resp.StatusCode != http.StatusOK {
 		reqr.Close()
-		// Does this apply to http3 lib?
 		io.Copy(ioutil.Discard, resp.Body)
 		resp.Body.Close()
 		return nil, fmt.Errorf("connect failed: %s", resp.Status)
 	}
-	return withReqResp{reqw: reqw, respr: resp.Body}, nil
+	return &withReqResp{reqr: reqr, reqw: reqw, respr: resp.Body}, nil
 }
 
 func (c *caddyHTTP3Connector) Close() error {
@@ -72,21 +71,29 @@ func (c *caddyHTTP3Connector) Close() error {
 }
 
 type withReqResp struct {
+	reqr  *io.PipeReader
 	reqw  *io.PipeWriter
+	rrmu  sync.Mutex
 	respr io.ReadCloser
 }
 
-func (rr withReqResp) Read(p []byte) (int, error) {
-	return rr.respr.Read(p)
+func (rr *withReqResp) Read(p []byte) (int, error) {
+	rr.rrmu.Lock()
+	n, err := rr.respr.Read(p)
+	rr.rrmu.Unlock()
+	return n, err
 }
 
-func (rr withReqResp) Write(p []byte) (int, error) {
+func (rr *withReqResp) Write(p []byte) (int, error) {
 	return rr.reqw.Write(p)
 }
 
-func (rr withReqResp) Close() error {
-	multierr := &errorsext.MultiErr{}
-	multierr.Append(rr.reqw.Close())
-	multierr.Append(rr.respr.Close())
-	return multierr.Err()
+func (rr *withReqResp) Close() error {
+	rr.reqr.Close()
+	rr.reqw.Close()
+	rr.rrmu.Lock() // Fix potential data race
+	io.Copy(ioutil.Discard, rr.respr)
+	err := rr.respr.Close()
+	rr.rrmu.Unlock()
+	return err
 }

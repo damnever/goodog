@@ -60,18 +60,12 @@ func (g *GoodogCaddyAdapter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				return err
 			}
 			g.Options.ConnectTimeout = d
-		case "read_timeout":
+		case "timeout":
 			d, err := time.ParseDuration(args[1])
 			if err != nil {
 				return err
 			}
-			g.Options.ReadTimeout = d
-		case "write_timeout":
-			d, err := time.ParseDuration(args[1])
-			if err != nil {
-				return err
-			}
-			g.Options.WriteTimeout = d
+			g.Options.Timeout = d
 		}
 	}
 	return nil
@@ -106,10 +100,10 @@ func (g *GoodogCaddyAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 		return nil
 	}
 
-	defer r.Body.Close()
 	args := r.URL.Query()
 	if args.Get("version") != "v1" {
 		w.WriteHeader(http.StatusBadRequest)
+		r.Body.Close()
 		return nil
 	}
 
@@ -134,13 +128,20 @@ func (g *GoodogCaddyAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 	case "tcp":
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.WriteHeader(http.StatusOK)
-		return g.forwarder.ForwardTCP(r.Context(), rw)
+		return g.forwarder.ForwardTCP(r.Context(), ioext.WithCloser{
+			ReadWriter: rw,
+			Closer:     r.Body,
+		})
 	case "udp":
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.WriteHeader(http.StatusOK)
-		return g.forwarder.ForwardUDP(r.Context(), rw)
+		return g.forwarder.ForwardUDP(r.Context(), ioext.WithCloser{
+			ReadWriter: rw,
+			Closer:     r.Body,
+		})
 	default:
 		w.WriteHeader(http.StatusBadRequest)
+		r.Body.Close()
 	}
 	return nil
 }

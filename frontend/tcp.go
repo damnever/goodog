@@ -7,6 +7,7 @@ import (
 
 	bytesext "github.com/damnever/libext-go/bytes"
 	netext "github.com/damnever/libext-go/net"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -16,6 +17,8 @@ type tcpProxy struct {
 	connector Connector
 	server    *netext.Server
 	pool      *bytesext.Pool
+
+	streams atomic.Uint32
 }
 
 func newTCPProxy(conf Config, connector Connector, logger *zap.Logger) (*tcpProxy, error) {
@@ -41,53 +44,53 @@ func (p *tcpProxy) Close() error {
 	return p.server.Close()
 }
 
-func (p *tcpProxy) handle(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
-	downstream := netext.NewTimedConn(conn, p.conf.ReadTimeout, p.conf.WriteTimeout)
-
+func (p *tcpProxy) handle(ctx context.Context, downstream net.Conn) {
 	upstream, err := p.connector.Connect(ctx)
 	if err != nil {
+		downstream.Close()
 		p.logger.Error("connect to upstream failed",
 			zap.String("upstream", p.conf.ServerHost()),
-			zap.String("downstream", conn.RemoteAddr().String()),
+			zap.String("downstream", downstream.RemoteAddr().String()),
 			zap.Error(err),
 		)
 		return
 	}
-	defer upstream.Close()
-	upstream = tryWrapWithCompression(upstream, p.conf.Compression)
+	p.logger.Info("+stream",
+		zap.Uint32("streams", p.streams.Inc()),
+		zap.String("upstream", p.conf.ServerHost()),
+		zap.String("downstream", downstream.RemoteAddr().String()),
+	)
 
-	waitc := make(chan struct{}) // NOTE(damnever): fix the unknown data race
-	go func() {
+	errc := make(chan error, 2)
+	streamFunc := func(dst, src io.ReadWriter, msg string) {
 		buf := p.pool.Get(8192)
-		defer p.pool.Put(buf)
-
-		if _, err := io.CopyBuffer(downstream, upstream, buf); err != nil {
-			p.logger.Error("streaming from upstream to downstream failed",
-				zap.String("upstream", p.conf.ServerHost()),
-				zap.String("downstream", conn.RemoteAddr().String()),
-				zap.Error(err),
-			)
+		_, err := io.CopyBuffer(dst, src, buf)
+		logf := p.logger.Info
+		if err != nil {
+			logf = p.logger.Warn
 		}
-		close(waitc)
-	}()
-
-	buf := p.pool.Get(8192)
-	defer p.pool.Put(buf)
-
-	if _, err := io.CopyBuffer(upstream, downstream, buf); err != nil {
-		p.logger.Error("streaming from downstream to upstream failed",
+		logf(msg,
 			zap.String("upstream", p.conf.ServerHost()),
-			zap.String("downstream", conn.RemoteAddr().String()),
+			zap.String("downstream", downstream.RemoteAddr().String()),
 			zap.Error(err),
 		)
+		p.pool.Put(buf)
+		errc <- err
 	}
+
+	upstream = tryWrapWithCompression(upstream, p.conf.Compression)
+	go streamFunc(downstream, upstream, "upstream->downstream done")
+	go streamFunc(upstream, downstream, "downstream->upstream done")
 
 	select {
 	case <-ctx.Done():
-		conn.Close()
-		<-waitc
-	case <-waitc:
-		return
+	case <-errc:
 	}
+	upstream.Close()
+	downstream.Close()
+	p.logger.Info("-stream",
+		zap.Uint32("streams", p.streams.Dec()),
+		zap.String("upstream", p.conf.ServerHost()),
+		zap.String("downstream", downstream.RemoteAddr().String()),
+	)
 }
