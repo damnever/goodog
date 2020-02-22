@@ -29,6 +29,8 @@ CMD ["sh", "-c", \
      -connect-timeout ${GOODOG_CONNECT_TIMEOUT:=5s} \
      -read-timeout ${GOODOG_READ_TIMEOUT:=1m} \
      -write-timeout ${GOODOG_WRITE_TIMEOUT:=3s} \
+     -write-timeout ${GOODOG_WRITE_TIMEOUT:=3s} \
+     -pprof-addr ${GOODOG_PPROF_ADDR} \
      -log-level ${GOODOG_LOG_LEVEL:=info}"]
 
 
