@@ -95,7 +95,7 @@ func (p *udpProxy) timeoutLoop(ctx context.Context) {
 			timedout := time.Now().Add(-timeout)
 			p.upmu.RLock()
 			for _, up := range p.ups {
-				if !up.WriteAt().After(timedout) {
+				if !up.ActiveAt().After(timedout) {
 					addrs = append(addrs, up.Addr())
 				}
 			}
@@ -106,7 +106,7 @@ func (p *udpProxy) timeoutLoop(ctx context.Context) {
 				p.upmu.Lock()
 				for _, addr := range addrs {
 					up, ok := p.ups[addr]
-					if ok && !up.WriteAt().After(timedout) {
+					if ok && !up.ActiveAt().After(timedout) {
 						up.Close()
 						delete(p.ups, addr)
 						count++
@@ -178,11 +178,11 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 		zap.String("upstream", p.conf.ServerHost()),
 		zap.String("downstream", downstreamAddr.String()),
 	)
-	go p.serveAddr(ctx, downstreamAddr, upstream)
+	go p.serveAddr(ctx, downstreamAddr, upstreamWrapper)
 	return upstreamWrapper, nil
 }
 
-func (p *udpProxy) serveAddr(ctx context.Context, downstreamAddr net.Addr, upstream io.ReadWriteCloser) {
+func (p *udpProxy) serveAddr(ctx context.Context, downstreamAddr net.Addr, upstream *udpUpstreamWrapper) {
 	var (
 		n   int
 		err error
@@ -190,7 +190,7 @@ func (p *udpProxy) serveAddr(ctx context.Context, downstreamAddr net.Addr, upstr
 	)
 	for {
 		// TODO: timeout??
-		n, err = encoding.ReadU16SizedBytes(upstream, buf)
+		n, err = upstream.ReadPacket(buf)
 		if err != nil {
 			break
 		}
@@ -217,15 +217,15 @@ func (p *udpProxy) serveAddr(ctx context.Context, downstreamAddr net.Addr, upstr
 }
 
 type udpUpstreamWrapper struct {
-	addr    string
-	writeAt atomic.Value
+	addr     string
+	activeAt atomic.Value
 
 	upstream io.ReadWriteCloser
 }
 
 func newUDPUpstreamWrapper(addr string, upstream io.ReadWriteCloser) *udpUpstreamWrapper {
 	u := &udpUpstreamWrapper{addr: addr, upstream: upstream}
-	u.writeAt.Store(time.Now())
+	u.activeAt.Store(time.Now())
 	return u
 }
 
@@ -233,16 +233,24 @@ func (u *udpUpstreamWrapper) Addr() string {
 	return u.addr
 }
 
-func (u *udpUpstreamWrapper) WritePacket(data []byte) error {
-	err := encoding.WriteU16SizedBytes(u.upstream, data)
+func (u *udpUpstreamWrapper) ReadPacket(p []byte) (int, error) {
+	n, err := encoding.ReadU16SizedBytes(u.upstream, p)
 	if err == nil {
-		u.writeAt.Store(time.Now())
+		u.activeAt.Store(time.Now())
+	}
+	return n, err
+}
+
+func (u *udpUpstreamWrapper) WritePacket(p []byte) error {
+	err := encoding.WriteU16SizedBytes(u.upstream, p)
+	if err == nil {
+		u.activeAt.Store(time.Now())
 	}
 	return err
 }
 
-func (u *udpUpstreamWrapper) WriteAt() time.Time {
-	return u.writeAt.Load().(time.Time)
+func (u *udpUpstreamWrapper) ActiveAt() time.Time {
+	return u.activeAt.Load().(time.Time)
 }
 
 func (u *udpUpstreamWrapper) Close() error {
