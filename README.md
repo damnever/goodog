@@ -16,5 +16,6 @@ make build
 curl localhost:2019/load -X POST -H "Content-Type: application/json" -d @etc/caddy.json
 
 # Start frontend
+# The full server uri: https://USERNAME:PASSWORD@DOMAIN/?version=v1&compression=snappy
 ./bin/goodog-frontend -server https://USERNAME:PASSWORD@DOMAIN/?version=v1 -listen :59487
 ```
