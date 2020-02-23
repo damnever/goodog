@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	_ "net/http/pprof" // Import pprof
 	"net/url"
 	"os"
 	"path/filepath"
@@ -28,6 +29,12 @@ import (
 
 func TestGoodog(t *testing.T) {
 	defer goleak.VerifyNone(t)
+
+	go func() {
+		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+			fmt.Printf("pprof server exit abnormally: %v\n", err)
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -98,7 +105,7 @@ func testWithArgs(ctx context.Context, t *testing.T, backendaddr string, args ur
 			require.Nil(t, err)
 			defer conn.Close()
 			var values []string
-			for j := 22; j < 222; j++ {
+			for j := 22; j < 99; j++ {
 				value := randext.String(j)
 				_, err := conn.Write([]byte(value))
 				require.Nil(t, err)
@@ -109,6 +116,16 @@ func testWithArgs(ctx context.Context, t *testing.T, backendaddr string, args ur
 			_, err = io.ReadFull(conn, buf)
 			require.Nil(t, err)
 			require.Equal(t, data, string(buf))
+
+			for j := 99; j < 222; j++ {
+				value := randext.String(j)
+				_, err := conn.Write([]byte(value))
+				require.Nil(t, err)
+				buf := make([]byte, len(value))
+				_, err = io.ReadFull(conn, buf)
+				require.Nil(t, err)
+				require.Equal(t, value, string(buf))
+			}
 		}()
 
 		wg.Add(1)

@@ -27,6 +27,7 @@ func ReadU16SizedBytes(r io.Reader, p []byte) (int, error) {
 }
 
 func WriteU16SizedBytes(w io.Writer, data []byte) error {
+	// XXX(damnever): make them a large one?
 	u16 := uint16(len(data))
 	if err := binary.Write(w, binary.BigEndian, u16); err != nil {
 		return err

@@ -19,28 +19,28 @@ var (
 		"fatal": zapcore.FatalLevel,
 	}
 
+	loggerConfig  zap.Config
 	DefaultLogger *zap.Logger
 )
 
 func init() {
 	fd := os.Stdout.Fd()
-	var config zap.Config
 	if isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd) {
-		config = zap.NewDevelopmentConfig()
+		loggerConfig = zap.NewDevelopmentConfig()
 	} else {
-		config = zap.NewProductionConfig()
+		loggerConfig = zap.NewProductionConfig()
 	}
-	config.OutputPaths = []string{"stdout"}
-	config.ErrorOutputPaths = []string{"stdout"}
+	loggerConfig.OutputPaths = []string{"stdout"}
+	loggerConfig.ErrorOutputPaths = []string{"stdout"}
 
 	var err error
-	if DefaultLogger, err = config.Build(); err != nil {
+	if DefaultLogger, err = loggerConfig.Build(); err != nil {
 		panic(err)
 	}
 }
 
 func setDefaultLogLevel(level string) {
-	DefaultLogger.Core().Enabled(LogLevel(level))
+	loggerConfig.Level.SetLevel(LogLevel(level))
 }
 
 func LogLevel(name string) zapcore.Level {

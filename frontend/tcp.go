@@ -65,11 +65,7 @@ func (p *tcpProxy) handle(ctx context.Context, downstream net.Conn) {
 	streamFunc := func(dst, src io.ReadWriter, msg string) {
 		buf := p.pool.Get(8192)
 		_, err := io.CopyBuffer(dst, src, buf)
-		logf := p.logger.Info
-		if err != nil {
-			logf = p.logger.Warn
-		}
-		logf(msg,
+		p.logger.Debug(msg,
 			zap.String("upstream", p.conf.ServerHost()),
 			zap.String("downstream", downstream.RemoteAddr().String()),
 			zap.Error(err),

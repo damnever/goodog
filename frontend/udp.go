@@ -6,13 +6,21 @@ import (
 	"math"
 	"net"
 	"sync"
+	"time"
 
+	"github.com/damnever/goctl/retry"
 	"github.com/damnever/goodog/internal/pkg/encoding"
 	bytesext "github.com/damnever/libext-go/bytes"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
+// udpProxy can not guarantee every single packet will be written to backend.
+//
+// IDEA: we could send UDP packet like this `| addr | size | data |`, so that
+// there is no need to keep checking stream if it is idle, just maintains a pool
+// of upstream streams, but this requires backend to keep tracking the address
+// related packet, this way looks same to me and it consumes more bandwidth.
 type udpProxy struct {
 	conf   Config
 	logger *zap.Logger
@@ -21,8 +29,9 @@ type udpProxy struct {
 	connector Connector
 	pool      *bytesext.Pool
 
+	retrier retry.Retrier
 	upmu    sync.RWMutex
-	ups     map[string]io.WriteCloser
+	ups     map[string]*udpUpstreamWrapper
 	streams atomic.Uint32
 }
 
@@ -37,7 +46,8 @@ func newUDPProxy(conf Config, connector Connector, logger *zap.Logger) (*udpProx
 		conn:      conn,
 		connector: connector,
 		pool:      bytesext.NewPoolWith(7, 512), // Max: math.MaxUint16
-		ups:       map[string]io.WriteCloser{},
+		retrier:   retry.New(retry.ZeroBackoffs(2)),
+		ups:       map[string]*udpUpstreamWrapper{},
 	}, nil
 }
 
@@ -51,6 +61,8 @@ func (p *udpProxy) Close() error {
 }
 
 func (p *udpProxy) Serve(ctx context.Context) error {
+	go p.timeoutLoop(ctx)
+
 	buf := make([]byte, math.MaxUint16, math.MaxUint16)
 	for {
 		n, addr, err := p.conn.ReadFrom(buf[:])
@@ -61,42 +73,84 @@ func (p *udpProxy) Serve(ctx context.Context) error {
 		data := p.pool.Get(n)
 		copy(data, buf[:n])
 		go func(data []byte) {
-			// FIXME(damnever): resuse this goroutine
+			// FIXME(damnever): try to resuse this goroutine?
 			p.handle(ctx, addr, data)
 			p.pool.Put(data)
 		}(data)
 	}
 }
 
+func (p *udpProxy) timeoutLoop(ctx context.Context) {
+	// FIXME(damnever): magic number
+	const timeout = 16 * time.Second
+	ticker := time.NewTicker(timeout / 4)
+	defer ticker.Stop()
+	addrs := []string{}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			timedout := time.Now().Add(-timeout)
+			p.upmu.RLock()
+			for _, up := range p.ups {
+				if !up.WriteAt().After(timedout) {
+					addrs = append(addrs, up.Addr())
+				}
+			}
+			p.upmu.RUnlock()
+
+			if len(addrs) > 0 {
+				count := 0
+				p.upmu.Lock()
+				for _, addr := range addrs {
+					up, ok := p.ups[addr]
+					if ok && !up.WriteAt().After(timedout) {
+						up.Close()
+						delete(p.ups, addr)
+						count++
+					}
+				}
+				p.upmu.Unlock()
+				addrs = addrs[:0]
+				p.logger.Info("idle check", zap.Int("closed", count))
+			}
+		}
+	}
+}
+
 func (p *udpProxy) handle(ctx context.Context, downstreamAddr net.Addr, data []byte) {
-	upstream, err := p.getRemoteWriter(ctx, downstreamAddr)
+	err := p.retrier.Run(ctx, func() (st retry.State, err0 error) {
+		var upstream *udpUpstreamWrapper
+		upstream, err0 = p.getRemoteWriter(ctx, downstreamAddr)
+		if err0 != nil {
+			p.logger.Error("connect to upstream failed",
+				zap.String("upstream", p.conf.ServerHost()),
+				zap.String("downstream", downstreamAddr.String()),
+				zap.Error(err0),
+			)
+			return
+		}
+
+		if err0 = upstream.WritePacket(data); err0 != nil {
+			upstream.Close()
+			p.upmu.Lock()
+			delete(p.ups, downstreamAddr.String())
+			p.upmu.Unlock()
+		}
+		return
+	})
 	if err != nil {
-		p.logger.Error("connect to upstream failed",
+		p.logger.Debug("downstream->upstream done",
 			zap.String("upstream", p.conf.ServerHost()),
 			zap.String("downstream", downstreamAddr.String()),
 			zap.Error(err),
 		)
-		return
 	}
-
-	err = encoding.WriteU16SizedBytes(upstream, data)
-	logf := p.logger.Info
-	if err != nil {
-		upstream.Close()
-		p.upmu.Lock()
-		delete(p.ups, downstreamAddr.String())
-		p.upmu.Unlock()
-
-		logf = p.logger.Warn
-	}
-	logf("downstream->upstream done",
-		zap.String("upstream", p.conf.ServerHost()),
-		zap.String("downstream", downstreamAddr.String()),
-		zap.Error(err),
-	)
 }
 
-func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr) (io.WriteCloser, error) {
+func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr) (*udpUpstreamWrapper, error) {
 	addrStr := downstreamAddr.String()
 	p.upmu.RLock()
 	w, ok := p.ups[addrStr]
@@ -117,50 +171,80 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 		return w, nil
 	}
 	upstream = tryWrapWithCompression(upstream, p.conf.Compression)
-	p.ups[addrStr] = upstream
-
+	upstreamWrapper := newUDPUpstreamWrapper(addrStr, upstream)
+	p.ups[addrStr] = upstreamWrapper
 	p.logger.Info("+stream",
 		zap.Uint32("streams", p.streams.Inc()),
 		zap.String("upstream", p.conf.ServerHost()),
-		zap.String("downstream", addrStr),
+		zap.String("downstream", downstreamAddr.String()),
 	)
-	go func() {
-		var (
-			n   int
-			err error
-			buf = p.pool.Get(math.MaxUint16)
-		)
-		for {
-			// TODO: timeout??
-			n, err = encoding.ReadU16SizedBytes(upstream, buf)
-			if err != nil {
-				break
-			}
-			if _, err = p.conn.WriteTo(buf[:n], downstreamAddr); err != nil {
-				break
-			}
-		}
-		p.pool.Put(buf)
+	go p.serveAddr(ctx, downstreamAddr, upstream)
+	return upstreamWrapper, nil
+}
 
-		p.upmu.Lock()
-		delete(p.ups, addrStr)
-		p.upmu.Unlock()
-		upstream.Close()
-
-		logf := p.logger.Info
+func (p *udpProxy) serveAddr(ctx context.Context, downstreamAddr net.Addr, upstream io.ReadWriteCloser) {
+	var (
+		n   int
+		err error
+		buf = p.pool.Get(math.MaxUint16)
+	)
+	for {
+		// TODO: timeout??
+		n, err = encoding.ReadU16SizedBytes(upstream, buf)
 		if err != nil {
-			logf = p.logger.Warn
+			break
 		}
-		logf("upstream->downstream done",
-			zap.String("upstream", p.conf.ServerHost()),
-			zap.String("downstream", downstreamAddr.String()),
-			zap.Error(err),
-		)
-		p.logger.Info("-stream",
-			zap.Uint32("streams", p.streams.Dec()),
-			zap.String("upstream", p.conf.ServerHost()),
-			zap.String("downstream", addrStr),
-		)
-	}()
-	return upstream, nil
+		if _, err = p.conn.WriteTo(buf[:n], downstreamAddr); err != nil {
+			break
+		}
+	}
+	p.pool.Put(buf)
+	p.logger.Debug("upstream->downstream done",
+		zap.String("upstream", p.conf.ServerHost()),
+		zap.String("downstream", downstreamAddr.String()),
+		zap.Error(err),
+	)
+
+	p.upmu.Lock()
+	delete(p.ups, downstreamAddr.String())
+	p.upmu.Unlock()
+	upstream.Close()
+	p.logger.Info("-stream",
+		zap.Uint32("streams", p.streams.Dec()),
+		zap.String("upstream", p.conf.ServerHost()),
+		zap.String("downstream", downstreamAddr.String()),
+	)
+}
+
+type udpUpstreamWrapper struct {
+	addr    string
+	writeAt atomic.Value
+
+	upstream io.ReadWriteCloser
+}
+
+func newUDPUpstreamWrapper(addr string, upstream io.ReadWriteCloser) *udpUpstreamWrapper {
+	u := &udpUpstreamWrapper{addr: addr, upstream: upstream}
+	u.writeAt.Store(time.Now())
+	return u
+}
+
+func (u *udpUpstreamWrapper) Addr() string {
+	return u.addr
+}
+
+func (u *udpUpstreamWrapper) WritePacket(data []byte) error {
+	err := encoding.WriteU16SizedBytes(u.upstream, data)
+	if err == nil {
+		u.writeAt.Store(time.Now())
+	}
+	return err
+}
+
+func (u *udpUpstreamWrapper) WriteAt() time.Time {
+	return u.writeAt.Load().(time.Time)
+}
+
+func (u *udpUpstreamWrapper) Close() error {
+	return u.upstream.Close()
 }

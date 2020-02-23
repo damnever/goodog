@@ -30,8 +30,8 @@ docker-image:  ## Build docker image. (Args: REG=docker.io TAG=latest TZ=Asia/Sh
 		docker tag $${FRONTEND_TAG} $(REG)/goodog/goodog-frontend:$(TAG)
 	# BACKEND_TAG=$(shell docker images goodog/goodog-backend-caddy:$(TAG) --format "{{.ID}}"); \
 		docker tag $${BACKEND_TAG} $(REG)/goodog/goodog-backend-caddy:$(TAG)
-	docker push $(REG)/goodog/goodog-frontend:$(TAG)
-	docker push $(REG)/goodog/goodog-backend-caddy:$(TAG)
+	# docker push $(REG)/goodog/goodog-frontend:$(TAG)
+	# docker push $(REG)/goodog/goodog-backend-caddy:$(TAG)
 
 
 
