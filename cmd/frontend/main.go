@@ -22,7 +22,7 @@ var (
 	flagServerURI  = flagset.String("server", "https://<DOMAIN>/?version=v1&compression=snappy", "The remote server URI")
 	flagConnector  = flagset.String("connector", "caddy-http3", "The connector(backend) type: [caddy-http3]")
 	flagLogLevel   = flagset.String("log-level", "info", "The log level: [debug, info, warn, error, panic, fatal]")
-	flagTimeout    = flagset.Duration("timeout", 15*time.Second, "The socket timeout")
+	flagTimeout    = flagset.Duration("timeout", 60*time.Second, "The socket timeout")
 	flagPProfAddr  = flagset.String("pprof-addr", "", "The address to enable golang pprof server")
 )
 

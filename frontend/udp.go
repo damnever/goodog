@@ -46,7 +46,7 @@ func newUDPProxy(conf Config, connector Connector, logger *zap.Logger) (*udpProx
 		conn:      conn,
 		connector: connector,
 		pool:      bytesext.NewPoolWith(7, 512), // Max: math.MaxUint16
-		retrier:   retry.New(retry.ZeroBackoffs(2)),
+		retrier:   retry.New(retry.ConstantBackoffs(2, 10*time.Millisecond)),
 		ups:       map[string]*udpUpstreamWrapper{},
 	}, nil
 }
@@ -82,8 +82,11 @@ func (p *udpProxy) Serve(ctx context.Context) error {
 
 func (p *udpProxy) timeoutLoop(ctx context.Context) {
 	// FIXME(damnever): magic number
-	const timeout = 16 * time.Second
-	ticker := time.NewTicker(timeout / 4)
+	timeout := 10 * time.Second
+	if p.conf.Timeout > timeout { // Is that ok?
+		timeout = p.conf.Timeout
+	}
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	addrs := []string{}
 

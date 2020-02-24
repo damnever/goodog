@@ -44,13 +44,13 @@ func (p *tcpProxy) Close() error {
 	return p.server.Close()
 }
 
-func (p *tcpProxy) handle(ctx context.Context, downstream net.Conn) {
+func (p *tcpProxy) handle(ctx context.Context, downstreamConn net.Conn) {
 	upstream, err := p.connector.Connect(ctx)
 	if err != nil {
-		downstream.Close()
+		downstreamConn.Close()
 		p.logger.Error("connect to upstream failed",
 			zap.String("upstream", p.conf.ServerHost()),
-			zap.String("downstream", downstream.RemoteAddr().String()),
+			zap.String("downstream", downstreamConn.RemoteAddr().String()),
 			zap.Error(err),
 		)
 		return
@@ -58,7 +58,7 @@ func (p *tcpProxy) handle(ctx context.Context, downstream net.Conn) {
 	p.logger.Info("+stream",
 		zap.Uint32("streams", p.streams.Inc()),
 		zap.String("upstream", p.conf.ServerHost()),
-		zap.String("downstream", downstream.RemoteAddr().String()),
+		zap.String("downstream", downstreamConn.RemoteAddr().String()),
 	)
 
 	errc := make(chan error, 2)
@@ -67,13 +67,14 @@ func (p *tcpProxy) handle(ctx context.Context, downstream net.Conn) {
 		_, err := io.CopyBuffer(dst, src, buf)
 		p.logger.Debug(msg,
 			zap.String("upstream", p.conf.ServerHost()),
-			zap.String("downstream", downstream.RemoteAddr().String()),
+			zap.String("downstream", downstreamConn.RemoteAddr().String()),
 			zap.Error(err),
 		)
 		p.pool.Put(buf)
 		errc <- err
 	}
 
+	downstream := netext.NewTimedConn(downstreamConn, p.conf.Timeout, p.conf.Timeout)
 	upstream = tryWrapWithCompression(upstream, p.conf.Compression)
 	go streamFunc(downstream, upstream, "upstream->downstream done")
 	go streamFunc(upstream, downstream, "downstream->upstream done")
@@ -87,6 +88,6 @@ func (p *tcpProxy) handle(ctx context.Context, downstream net.Conn) {
 	p.logger.Info("-stream",
 		zap.Uint32("streams", p.streams.Dec()),
 		zap.String("upstream", p.conf.ServerHost()),
-		zap.String("downstream", downstream.RemoteAddr().String()),
+		zap.String("downstream", downstreamConn.RemoteAddr().String()),
 	)
 }

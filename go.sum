@@ -83,8 +83,8 @@ github.com/cpuguy83/go-md2man/v2 v2.0.0-20190314233015-f79a8a8ca69d/go.mod h1:ma
 github.com/daaku/go.zipexe v1.0.0/go.mod h1:z8IiR6TsVLEYKwXAoE/I+8ys/sDkgTzSL0CLnGVd57E=
 github.com/damnever/goctl v1.2.0 h1:tDv6QmhQKv4r/2ZAW9rj/MMLy8eko0o845J5JRyj8j8=
 github.com/damnever/goctl v1.2.0/go.mod h1:bJxWYL3G4v96me6dLwW5lh8rWDMmrz4SygMQaBFOEfA=
-github.com/damnever/libext-go v0.1.0 h1:8IYeBxm811DnUk0nP4gzZ8WAvptAXBIDdl4u+O2kJy4=
-github.com/damnever/libext-go v0.1.0/go.mod h1:JeYvHBDGFLjM4JsW9ZOKSAUl/gnp8voThP13uZL+J80=
+github.com/damnever/libext-go v0.1.1 h1:MgTXsZytCImmho8fhKBOx/ZgXnO9DY00Cv16o0kkIIU=
+github.com/damnever/libext-go v0.1.1/go.mod h1:JeYvHBDGFLjM4JsW9ZOKSAUl/gnp8voThP13uZL+J80=
 github.com/danwakefield/fnmatch v0.0.0-20160403171240-cbb64ac3d964 h1:y5HC9v93H5EPKqaS1UYVg1uYah5Xf51mBfIoWehClUQ=
 github.com/danwakefield/fnmatch v0.0.0-20160403171240-cbb64ac3d964/go.mod h1:Xd9hchkHSWYkEqJwUGisez3G1QY8Ryz0sdWrLPMGjLk=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
