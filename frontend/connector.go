@@ -47,6 +47,7 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, 
 	reqr, reqw := io.Pipe()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, reqr)
 	if err != nil {
+		reqr.Close()
 		return nil, err
 	}
 	// req.Header.Set("Transfer-Encoding", "chunked")
@@ -54,6 +55,7 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, 
 
 	resp, err := c.client.Do(req)
 	if err != nil {
+		reqr.Close()
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
