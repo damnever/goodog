@@ -97,7 +97,7 @@ func testWithArgs(ctx context.Context, t *testing.T, backendaddr string, args ur
 	time.Sleep(333 * time.Millisecond)
 
 	wg := sync.WaitGroup{}
-	for i := 0; i < 22; i++ {
+	for i := 0; i < 12; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

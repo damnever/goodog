@@ -37,6 +37,7 @@ docker-image:  ## Build docker image. (Args: REG=docker.io TAG=latest TZ=Asia/Sh
 
 GOLANGCI_LINT_VERSION ?= "latest"
 
+test: SHELL:=/bin/bash
 test:  ## Run test cases. (Args: GOLANGCI_LINT_VERSION=latest)
 	GOLANGCI_LINT_CMD=golangci-lint; \
 	if [[ ! -x $$(command -v golangci-lint) ]]; then \
