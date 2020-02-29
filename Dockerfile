@@ -15,7 +15,7 @@ ENV TZ $TZ
 ENV GOODOG_SERVER_URI :invalid:
 ENV GOODOG_LISTEN_ADDRESS :59487
 ENV GOODOG_CONNECTOR caddy-http3
-ENV GOODOG_TIMEOUT 30s
+ENV GOODOG_TIMEOUT 60s
 ENV GOODOG_LOG_LEVEL info
 EXPOSE 59487/tcp
 EXPOSE 59487/udp
@@ -24,7 +24,7 @@ CMD ["sh", "-c", \
      -server ${GOODOG_SERVER_URI:=:invalid:} \
      -listen ${GOODOG_LISTEN_ADDRESS:=:59487} \
      -connector ${GOODOG_CONNECTOR:=caddy-http3} \
-     -timeout ${GOODOG_TIMEOUT:=5s} \
+     -timeout ${GOODOG_TIMEOUT:=60s} \
      -pprof-addr ${GOODOG_PPROF_ADDR} \
      -log-level ${GOODOG_LOG_LEVEL:=info}"]
 

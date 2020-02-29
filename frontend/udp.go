@@ -32,7 +32,12 @@ type udpProxy struct {
 	retrier retry.Retrier
 	upmu    sync.RWMutex
 	ups     map[string]*udpUpstreamWrapper
-	streams atomic.Uint32
+
+	pendingUpstreams *counter
+	upstreams        *counter
+	idleClosed       *counter
+	connectErrors    *counter
+	readWriteErrors  *counter
 }
 
 func newUDPProxy(conf Config, connector Connector, logger *zap.Logger) (*udpProxy, error) {
@@ -46,8 +51,14 @@ func newUDPProxy(conf Config, connector Connector, logger *zap.Logger) (*udpProx
 		conn:      conn,
 		connector: connector,
 		pool:      bytesext.NewPoolWith(7, 512), // Max: math.MaxUint16
-		retrier:   retry.New(retry.ZeroBackoffs(2)),
+		retrier:   retry.New(retry.ConstantBackoffs(2, 10*time.Millisecond)),
 		ups:       map[string]*udpUpstreamWrapper{},
+
+		pendingUpstreams: newCounter("udp.pending-upstreams"),
+		upstreams:        newCounter("udp.upstreams"),
+		idleClosed:       newCounter("udp.idle-timeouts"),
+		connectErrors:    newCounter("udp.errors.connect"),
+		readWriteErrors:  newCounter("udp.errors.read-write"),
 	}, nil
 }
 
@@ -82,8 +93,11 @@ func (p *udpProxy) Serve(ctx context.Context) error {
 
 func (p *udpProxy) timeoutLoop(ctx context.Context) {
 	// FIXME(damnever): magic number
-	const timeout = 16 * time.Second
-	ticker := time.NewTicker(timeout / 4)
+	timeout := 10 * time.Second
+	if p.conf.Timeout > timeout { // Is that ok?
+		timeout = p.conf.Timeout
+	}
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	addrs := []string{}
 
@@ -114,7 +128,10 @@ func (p *udpProxy) timeoutLoop(ctx context.Context) {
 				}
 				p.upmu.Unlock()
 				addrs = addrs[:0]
-				p.logger.Info("idle check", zap.Int("closed", count))
+				if count > 0 {
+					p.logger.Info("idle check", zap.Int("closed", count))
+					p.idleClosed.Add(uint32(count))
+				}
 			}
 		}
 	}
@@ -125,11 +142,6 @@ func (p *udpProxy) handle(ctx context.Context, downstreamAddr net.Addr, data []b
 		var upstream *udpUpstreamWrapper
 		upstream, err0 = p.getRemoteWriter(ctx, downstreamAddr)
 		if err0 != nil {
-			p.logger.Error("connect to upstream failed",
-				zap.String("upstream", p.conf.ServerHost()),
-				zap.String("downstream", downstreamAddr.String()),
-				zap.Error(err0),
-			)
 			return
 		}
 
@@ -142,6 +154,7 @@ func (p *udpProxy) handle(ctx context.Context, downstreamAddr net.Addr, data []b
 		return
 	})
 	if err != nil {
+		p.readWriteErrors.Inc()
 		p.logger.Debug("downstream->upstream done",
 			zap.String("upstream", p.conf.ServerHost()),
 			zap.String("downstream", downstreamAddr.String()),
@@ -159,10 +172,19 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 		return w, nil
 	}
 
+	p.pendingUpstreams.Inc()
 	upstream, err := p.connector.Connect(ctx)
 	if err != nil {
+		p.pendingUpstreams.Dec()
+		p.connectErrors.Inc()
+		p.logger.Error("connect to upstream failed",
+			zap.String("upstream", p.conf.ServerHost()),
+			zap.String("downstream", downstreamAddr.String()),
+			zap.Error(err),
+		)
 		return nil, err
 	}
+	p.pendingUpstreams.Dec()
 
 	p.upmu.Lock()
 	defer p.upmu.Unlock()
@@ -170,14 +192,11 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 		upstream.Close()
 		return w, nil
 	}
+	p.upstreams.Inc()
+
 	upstream = tryWrapWithCompression(upstream, p.conf.Compression)
 	upstreamWrapper := newUDPUpstreamWrapper(addrStr, upstream)
 	p.ups[addrStr] = upstreamWrapper
-	p.logger.Info("+stream",
-		zap.Uint32("streams", p.streams.Inc()),
-		zap.String("upstream", p.conf.ServerHost()),
-		zap.String("downstream", downstreamAddr.String()),
-	)
 	go p.serveAddr(ctx, downstreamAddr, upstreamWrapper)
 	return upstreamWrapper, nil
 }
@@ -190,11 +209,12 @@ func (p *udpProxy) serveAddr(ctx context.Context, downstreamAddr net.Addr, upstr
 	)
 	for {
 		// TODO: timeout??
-		n, err = upstream.ReadPacket(buf)
-		if err != nil {
+		if n, err = upstream.ReadPacket(buf); err != nil {
+			p.readWriteErrors.Inc()
 			break
 		}
 		if _, err = p.conn.WriteTo(buf[:n], downstreamAddr); err != nil {
+			p.readWriteErrors.Inc()
 			break
 		}
 	}
@@ -209,11 +229,7 @@ func (p *udpProxy) serveAddr(ctx context.Context, downstreamAddr net.Addr, upstr
 	delete(p.ups, downstreamAddr.String())
 	p.upmu.Unlock()
 	upstream.Close()
-	p.logger.Info("-stream",
-		zap.Uint32("streams", p.streams.Dec()),
-		zap.String("upstream", p.conf.ServerHost()),
-		zap.String("downstream", downstreamAddr.String()),
-	)
+	p.upstreams.Dec()
 }
 
 type udpUpstreamWrapper struct {
