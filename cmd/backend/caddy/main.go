@@ -6,6 +6,7 @@ import (
 	caddy "github.com/caddyserver/caddy/v2"
 	caddycmd "github.com/caddyserver/caddy/v2/cmd"
 	_ "github.com/caddyserver/caddy/v2/modules/standard" // Caddy standard modules
+
 	"github.com/damnever/goodog"
 	_ "github.com/damnever/goodog/backend/caddy" // Caddy module: http.handlers.goodog
 )

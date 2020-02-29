@@ -6,29 +6,30 @@ import (
 	"math"
 	"net"
 
-	"github.com/damnever/goodog/internal/pkg/encoding"
 	bytesext "github.com/damnever/libext-go/bytes"
 	errorsext "github.com/damnever/libext-go/errors"
+	ioext "github.com/damnever/libext-go/io"
 	netext "github.com/damnever/libext-go/net"
 	"go.uber.org/zap"
+
+	"github.com/damnever/goodog/internal/pkg/encoding"
+	goodogioutil "github.com/damnever/goodog/internal/pkg/ioutil"
 )
 
 type forwarder struct {
 	opts Options
 
-	dialer         *net.Dialer
-	logger         *zap.Logger
-	copyBufferPool *bytesext.Pool
-	udpBufferPool  *bytesext.Pool
+	dialer        *net.Dialer
+	logger        *zap.Logger
+	udpBufferPool *bytesext.Pool
 }
 
 func newForwarder(logger *zap.Logger, opts Options) *forwarder {
 	return &forwarder{
-		opts:           opts,
-		dialer:         &net.Dialer{Timeout: opts.ConnectTimeout},
-		logger:         logger,
-		copyBufferPool: bytesext.NewPoolWith(0, 8192),
-		udpBufferPool:  bytesext.NewPoolWith(0, math.MaxUint16),
+		opts:          opts,
+		dialer:        &net.Dialer{Timeout: opts.ConnectTimeout},
+		logger:        logger,
+		udpBufferPool: bytesext.NewPoolWith(0, math.MaxUint16),
 	}
 }
 
@@ -66,7 +67,12 @@ func (f *forwarder) ForwardUDP(ctx context.Context, downstream io.ReadWriteClose
 			if n, err = upstream.Read(buf); err != nil {
 				break
 			}
-			if err = encoding.WriteU16SizedBytes(downstream, buf[:n]); err != nil {
+			if err = encoding.WriteU16SizedBytes(downstream, buf[:n]); err == nil {
+				if f, ok := downstream.(ioext.Flusher); ok {
+					err = f.Flush()
+				}
+			}
+			if err != nil {
 				break
 			}
 		}
@@ -109,20 +115,18 @@ func (f *forwarder) wait(ctx context.Context, upCloseFunc, downCloseFunc func() 
 		}
 		if !closed {
 			closed = true
-			upCloseFunc()
-			downCloseFunc()
+			_ = upCloseFunc()
+			_ = downCloseFunc()
 		}
 	}
 	if !closed {
-		upCloseFunc()
-		downCloseFunc()
+		_ = upCloseFunc()
+		_ = downCloseFunc()
 	}
 	return multierr.Err()
 }
 
 func (f *forwarder) stream(dst io.Writer, src io.Reader, errc chan error) {
-	buf := f.copyBufferPool.Get(8192)
-	_, err := io.CopyBuffer(dst, src, buf)
-	f.copyBufferPool.Put(buf)
+	_, err := goodogioutil.Copy(dst, src, false)
 	errc <- err
 }

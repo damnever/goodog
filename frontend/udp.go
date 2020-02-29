@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/damnever/goctl/retry"
-	"github.com/damnever/goodog/internal/pkg/encoding"
 	bytesext "github.com/damnever/libext-go/bytes"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+
+	"github.com/damnever/goodog/internal/pkg/encoding"
 )
 
 // udpProxy can not guarantee every single packet will be written to backend.
@@ -76,7 +77,7 @@ func (p *udpProxy) Serve(ctx context.Context) error {
 
 	buf := make([]byte, math.MaxUint16, math.MaxUint16)
 	for {
-		n, addr, err := p.conn.ReadFrom(buf[:])
+		n, addr, err := p.conn.ReadFrom(buf)
 		if err != nil {
 			return err
 		}
@@ -201,7 +202,7 @@ func (p *udpProxy) getRemoteWriter(ctx context.Context, downstreamAddr net.Addr)
 	return upstreamWrapper, nil
 }
 
-func (p *udpProxy) serveAddr(ctx context.Context, downstreamAddr net.Addr, upstream *udpUpstreamWrapper) {
+func (p *udpProxy) serveAddr(_ context.Context, downstreamAddr net.Addr, upstream *udpUpstreamWrapper) {
 	var (
 		n   int
 		err error

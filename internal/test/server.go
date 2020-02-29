@@ -17,14 +17,16 @@ func tcpEchoServer(ctx context.Context, laddr string, t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("tcp server init failed: %v", err)
+		panic(err)
 	}
 
 	go func() {
 		<-ctx.Done()
-		server.Close()
+		_ = server.Close()
 	}()
-	server.Serve(netext.WithContext(ctx))
+	if err := server.Serve(netext.WithContext(ctx)); err != nil {
+		panic(err)
+	}
 }
 
 func udpEchoServer(ctx context.Context, laddr string, t *testing.T) {
@@ -34,11 +36,13 @@ func udpEchoServer(ctx context.Context, laddr string, t *testing.T) {
 		}
 	})
 	if err != nil {
-		t.Fatalf("udp server init failed: %v", err)
+		panic(err)
 	}
 	go func() {
 		<-ctx.Done()
-		server.Close()
+		_ = server.Close()
 	}()
-	server.Serve(netext.WithContext(ctx))
+	if err := server.Serve(netext.WithContext(ctx)); err != nil {
+		panic(err)
+	}
 }

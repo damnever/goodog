@@ -56,7 +56,7 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, 
 		reqr.Close()
 		reqw.Close()
 		if resp != nil {
-			io.Copy(ioutil.Discard, resp.Body)
+			_, _ = io.Copy(ioutil.Discard, resp.Body)
 			resp.Body.Close()
 		}
 		c.release(client)
@@ -65,7 +65,7 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, 
 	if resp.StatusCode != http.StatusOK {
 		reqr.Close()
 		reqw.Close()
-		io.Copy(ioutil.Discard, resp.Body)
+		_, _ = io.Copy(ioutil.Discard, resp.Body)
 		resp.Body.Close()
 		c.release(client)
 		return nil, fmt.Errorf("connect failed: %s", resp.Status)
@@ -153,7 +153,7 @@ func (rr *withReqResp) Close() error {
 	rr.reqr.Close()
 	rr.reqw.Close()
 	rr.rrmu.Lock() // Fix potential data race
-	io.Copy(ioutil.Discard, rr.respr)
+	_, _ = io.Copy(ioutil.Discard, rr.respr)
 	err := rr.respr.Close()
 	rr.rrmu.Unlock()
 	rr.onClose()

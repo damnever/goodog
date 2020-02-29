@@ -69,12 +69,12 @@ func NewProxy(conf Config) (*Proxy, error) {
 	setDefaultLogLevel(conf.LogLevel)
 
 	tcpconnector := newCaddyHTTP3Connector(conf.makeURI("tcp"), conf.InsecureSkipVerify, conf.Timeout)
-	tcpserver, err := newTCPProxy(conf, tcpconnector, DefaultLogger)
+	tcpserver, err := newTCPProxy(conf, tcpconnector, _DefaultLogger)
 	if err != nil {
 		return nil, err
 	}
 	udpconnector := newCaddyHTTP3Connector(conf.makeURI("udp"), conf.InsecureSkipVerify, conf.Timeout)
-	udpserver, err := newUDPProxy(conf, udpconnector, DefaultLogger)
+	udpserver, err := newUDPProxy(conf, udpconnector, _DefaultLogger)
 	if err != nil {
 		tcpserver.Close()
 		return nil, err
@@ -88,7 +88,7 @@ func NewProxy(conf Config) (*Proxy, error) {
 }
 
 func (p *Proxy) Serve(ctx context.Context) error {
-	logger := DefaultLogger.Sugar()
+	logger := _DefaultLogger.Sugar()
 	errc := make(chan error, 2)
 	go func() {
 		logger.Infof("TCP listen at: %s", p.conf.ListenAddr)

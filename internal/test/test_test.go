@@ -20,11 +20,12 @@ import (
 
 	caddycmd "github.com/caddyserver/caddy/v2/cmd"
 	_ "github.com/caddyserver/caddy/v2/modules/standard" // Plug in Caddy module
-	_ "github.com/damnever/goodog/backend/caddy"         // Plug in Caddy module
-	"github.com/damnever/goodog/frontend"
 	randext "github.com/damnever/libext-go/rand"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+
+	_ "github.com/damnever/goodog/backend/caddy" // Plug in Caddy module
+	"github.com/damnever/goodog/frontend"
 )
 
 func TestGoodog(t *testing.T) {
@@ -96,7 +97,7 @@ func testWithArgs(ctx context.Context, t *testing.T, backendaddr string, args ur
 	time.Sleep(333 * time.Millisecond)
 
 	wg := sync.WaitGroup{}
-	for i := 0; i < 22; i++ {
+	for i := 0; i < 12; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -107,7 +108,7 @@ func testWithArgs(ctx context.Context, t *testing.T, backendaddr string, args ur
 			var values []string
 			for j := 22; j < 99; j++ {
 				value := randext.String(j)
-				_, err := conn.Write([]byte(value))
+				_, err = conn.Write([]byte(value))
 				require.Nil(t, err)
 				values = append(values, value)
 			}

@@ -2,6 +2,7 @@ package caddy
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -10,9 +11,10 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"github.com/damnever/goodog/internal/pkg/snappypool"
 	ioext "github.com/damnever/libext-go/io"
 	"go.uber.org/zap"
+
+	"github.com/damnever/goodog/internal/pkg/snappypool"
 )
 
 func init() {
@@ -90,14 +92,12 @@ func (g *GoodogCaddyAdapter) Validate() error {
 }
 
 func (g *GoodogCaddyAdapter) Cleanup() error {
-	g.logger.Sync()
-	return nil
+	return g.logger.Sync()
 }
 
 func (g *GoodogCaddyAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	if r.Method != http.MethodPost {
-		next.ServeHTTP(w, r)
-		return nil
+		return next.ServeHTTP(w, r)
 	}
 
 	args := r.URL.Query()
@@ -107,16 +107,17 @@ func (g *GoodogCaddyAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 		return nil
 	}
 
-	rw := ioext.WithReadWriter{
+	sw := &caddyStreamWrapper{
 		Reader: r.Body,
 		Writer: w,
+		Closer: r.Body,
 	}
 	switch strings.ToLower(args.Get("compression")) {
 	case "snappy":
 		snappyr := snappypool.GetReader(r.Body)
-		rw.Reader = snappyr
+		sw.Reader = snappyr
 		snappyw := snappypool.GetWriter(w)
-		rw.Writer = snappyw
+		sw.Writer = snappyw
 		defer func() {
 			snappypool.PutReader(snappyr)
 			snappypool.PutWriter(snappyw)
@@ -128,20 +129,30 @@ func (g *GoodogCaddyAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 	case "tcp":
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.WriteHeader(http.StatusOK)
-		return g.forwarder.ForwardTCP(r.Context(), ioext.WithCloser{
-			ReadWriter: rw,
-			Closer:     r.Body,
-		})
+		return g.forwarder.ForwardTCP(r.Context(), sw)
 	case "udp":
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.WriteHeader(http.StatusOK)
-		return g.forwarder.ForwardUDP(r.Context(), ioext.WithCloser{
-			ReadWriter: rw,
-			Closer:     r.Body,
-		})
+		return g.forwarder.ForwardUDP(r.Context(), sw)
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		r.Body.Close()
 	}
 	return nil
+}
+
+type caddyStreamWrapper struct {
+	io.Reader
+	io.Writer
+	io.Closer
+}
+
+func (s *caddyStreamWrapper) Write(p []byte) (n int, err error) {
+	n, err = s.Writer.Write(p)
+	if err == nil {
+		if f, ok := s.Writer.(ioext.Flusher); ok {
+			err = f.Flush()
+		}
+	}
+	return
 }

@@ -9,8 +9,8 @@ GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 NOW = $(shell date '+%Y-%m-%d')
 REV = $(shell git rev-parse --short HEAD || echo unknown)
-LDFLAGS = -ldflags '-X github.com/damnever/goodog.gitSHA=$(REV) \
-		-X github.com/damnever/goodog.buildDate=$(NOW)'
+LDFLAGS = -ldflags '-X github.com/damnever/goodog._gitSHA=$(REV) \
+		-X github.com/damnever/goodog._buildDate=$(NOW)'
 
 
 build:  ## Build executable files. (Args: GOOS=$(go env GOOS) GOARCH=$(go env GOARCH))
@@ -37,6 +37,7 @@ docker-image:  ## Build docker image. (Args: REG=docker.io TAG=latest TZ=Asia/Sh
 
 GOLANGCI_LINT_VERSION ?= "latest"
 
+test: SHELL:=/bin/bash
 test:  ## Run test cases. (Args: GOLANGCI_LINT_VERSION=latest)
 	GOLANGCI_LINT_CMD=golangci-lint; \
 	if [[ ! -x $$(command -v golangci-lint) ]]; then \
@@ -45,9 +46,9 @@ test:  ## Run test cases. (Args: GOLANGCI_LINT_VERSION=latest)
 		fi; \
 		GOLANGCI_LINT_CMD=./bin/golangci-lint; \
 	fi; \
-    	$${GOLANGCI_LINT_CMD} run .
+    	$${GOLANGCI_LINT_CMD} run ./...
 	go test -v -race -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out  # -o coverage.html
+	# go tool cover -html=coverage.out  # -o coverage.html
 
 
 deps: ## Update dependencies.
