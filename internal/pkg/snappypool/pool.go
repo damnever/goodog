@@ -8,20 +8,20 @@ import (
 )
 
 var (
-	snappyReaderPool = &sync.Pool{
+	_snappyReaderPool = &sync.Pool{
 		New: func() interface{} {
 			return snappy.NewReader(nil)
 		},
 	}
-	snappyWriterPool = &sync.Pool{
+	_snappyWriterPool = &sync.Pool{
 		New: func() interface{} {
-			return snappy.NewWriter(nil)
+			return snappy.NewBufferedWriter(nil)
 		},
 	}
 )
 
 func GetReader(r io.Reader) *snappy.Reader {
-	snappyr := snappyReaderPool.Get().(*snappy.Reader)
+	snappyr := _snappyReaderPool.Get().(*snappy.Reader)
 	snappyr.Reset(r)
 	return snappyr
 }
@@ -31,11 +31,11 @@ func PutReader(r *snappy.Reader) {
 		return
 	}
 	r.Reset(nil)
-	snappyReaderPool.Put(r)
+	_snappyReaderPool.Put(r)
 }
 
 func GetWriter(w io.Writer) *snappy.Writer {
-	snappyw := snappyWriterPool.Get().(*snappy.Writer)
+	snappyw := _snappyWriterPool.Get().(*snappy.Writer)
 	snappyw.Reset(w)
 	return snappyw
 }
@@ -45,5 +45,5 @@ func PutWriter(w *snappy.Writer) {
 		return
 	}
 	w.Reset(nil)
-	snappyWriterPool.Put(w)
+	_snappyWriterPool.Put(w)
 }

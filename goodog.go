@@ -5,33 +5,33 @@ import (
 )
 
 var (
-	version   = "0.1.0"
-	buildDate = ""
-	gitSHA    = ""
+	_version   = "0.1.0"
+	_buildDate = ""
+	_gitSHA    = ""
 )
 
 func Version() string {
-	return version
+	return _version
 }
 
 func VersionInfo() string {
 	info := &strings.Builder{}
 	info.WriteString("goodog ")
-	info.WriteString(version)
-	if buildDate != "" || gitSHA != "" {
+	info.WriteString(_version)
+	if _buildDate != "" || _gitSHA != "" {
 		info.WriteString(" (")
 		space := false
-		if gitSHA != "" {
+		if _gitSHA != "" {
 			space = true
 			info.WriteString("git@")
-			info.WriteString(gitSHA)
+			info.WriteString(_gitSHA)
 		}
-		if buildDate != "" {
+		if _buildDate != "" {
 			if space {
 				info.WriteString(" ")
 			}
 			info.WriteString("date@")
-			info.WriteString(buildDate)
+			info.WriteString(_buildDate)
 		}
 		info.WriteString(")")
 	}

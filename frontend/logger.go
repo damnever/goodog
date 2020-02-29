@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	logLevels = map[string]zapcore.Level{
+	_logLevels = map[string]zapcore.Level{
 		"debug": zapcore.DebugLevel,
 		"info":  zapcore.InfoLevel,
 		"warn":  zapcore.WarnLevel,
@@ -19,32 +19,32 @@ var (
 		"fatal": zapcore.FatalLevel,
 	}
 
-	loggerConfig  zap.Config
-	DefaultLogger *zap.Logger
+	_loggerConfig  zap.Config
+	_DefaultLogger *zap.Logger
 )
 
 func init() {
 	fd := os.Stdout.Fd()
 	if isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd) {
-		loggerConfig = zap.NewDevelopmentConfig()
+		_loggerConfig = zap.NewDevelopmentConfig()
 	} else {
-		loggerConfig = zap.NewProductionConfig()
+		_loggerConfig = zap.NewProductionConfig()
 	}
-	loggerConfig.OutputPaths = []string{"stdout"}
-	loggerConfig.ErrorOutputPaths = []string{"stdout"}
+	_loggerConfig.OutputPaths = []string{"stdout"}
+	_loggerConfig.ErrorOutputPaths = []string{"stdout"}
 
 	var err error
-	if DefaultLogger, err = loggerConfig.Build(); err != nil {
+	if _DefaultLogger, err = _loggerConfig.Build(); err != nil {
 		panic(err)
 	}
 }
 
 func setDefaultLogLevel(level string) {
-	loggerConfig.Level.SetLevel(LogLevel(level))
+	_loggerConfig.Level.SetLevel(LogLevel(level))
 }
 
 func LogLevel(name string) zapcore.Level {
-	if lvl, ok := logLevels[strings.ToLower(name)]; ok {
+	if lvl, ok := _logLevels[strings.ToLower(name)]; ok {
 		return lvl
 	}
 	return zapcore.InfoLevel

@@ -5,8 +5,10 @@ import (
 	"io"
 	"sync"
 
-	"github.com/damnever/goodog/internal/pkg/snappypool"
+	ioext "github.com/damnever/libext-go/io"
 	"github.com/golang/snappy"
+
+	"github.com/damnever/goodog/internal/pkg/snappypool"
 )
 
 func tryWrapWithCompression(rwc io.ReadWriteCloser, compressMethod string) io.ReadWriteCloser {
@@ -51,6 +53,11 @@ func (c *withCompression) Write(p []byte) (n int, err error) {
 	c.wmu.Lock()
 	if c.writer != nil {
 		n, err = c.writer.Write(p)
+		if err == nil {
+			if f, ok := c.writer.(ioext.Flusher); ok {
+				err = f.Flush()
+			}
+		}
 	} else {
 		err = errWriterClosed
 	}
@@ -72,6 +79,9 @@ func (c *withCompression) Close() error {
 
 	c.wmu.Lock()
 	if c.writer != nil {
+		if wc, ok := c.writer.(io.Closer); ok {
+			_ = wc.Close()
+		}
 		if snappyw, ok := c.writer.(*snappy.Writer); ok {
 			snappypool.PutWriter(snappyw)
 		}

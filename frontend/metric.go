@@ -11,12 +11,12 @@ import (
 )
 
 var (
-	metricMu = sync.Mutex{}
-	metric   = metricMap{}
+	_metricMu = sync.Mutex{}
+	_metric   = metricMap{}
 )
 
 func init() {
-	expvar.Publish("goodog-frontend", metric)
+	expvar.Publish("goodog-frontend", _metric)
 }
 
 type metricMap map[string]expvar.Var
@@ -48,9 +48,9 @@ func newCounter(name string) *counter {
 	parts := strings.Split(name, ".")
 	n := len(parts)
 
-	metricMu.Lock()
-	defer metricMu.Unlock()
-	next := metric
+	_metricMu.Lock()
+	defer _metricMu.Unlock()
+	next := _metric
 	for _, part := range parts[:n-1] {
 		m, ok := next[part].(metricMap)
 		if !ok {

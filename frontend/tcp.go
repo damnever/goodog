@@ -5,9 +5,10 @@ import (
 	"io"
 	"net"
 
-	bytesext "github.com/damnever/libext-go/bytes"
 	netext "github.com/damnever/libext-go/net"
 	"go.uber.org/zap"
+
+	goodogioutil "github.com/damnever/goodog/internal/pkg/ioutil"
 )
 
 type tcpProxy struct {
@@ -15,7 +16,6 @@ type tcpProxy struct {
 	logger    *zap.Logger
 	connector Connector
 	server    *netext.Server
-	pool      *bytesext.Pool
 
 	downstreams     *counter
 	upstreams       *counter
@@ -28,7 +28,6 @@ func newTCPProxy(conf Config, connector Connector, logger *zap.Logger) (*tcpProx
 		conf:      conf,
 		logger:    logger.Named("tcp"),
 		connector: connector,
-		pool:      bytesext.NewPoolWith(0, 8192),
 
 		downstreams:     newCounter("tcp.downstreams"),
 		upstreams:       newCounter("tcp.upstreams"),
@@ -69,14 +68,12 @@ func (p *tcpProxy) handle(ctx context.Context, downstreamConn net.Conn) {
 
 	errc := make(chan error, 2)
 	streamFunc := func(dst, src io.ReadWriter, msg string) {
-		buf := p.pool.Get(8192)
-		_, err := io.CopyBuffer(dst, src, buf)
+		_, err := goodogioutil.Copy(dst, src, false)
 		p.logger.Debug(msg,
 			zap.String("upstream", p.conf.ServerHost()),
 			zap.String("downstream", downstreamConn.RemoteAddr().String()),
 			zap.Error(err),
 		)
-		p.pool.Put(buf)
 		if err != nil {
 			p.readWriteErrors.Inc()
 		}
