@@ -1,14 +1,20 @@
-name: GoCI
-on: [push, pull_request]
+name: golang-test
+on:
+  push:
+    tags:
+      - v*
+    branches:
+      - development
+      - v*
+  pull_request:
 jobs:
-
   build:
     name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - name: Setup go
-        uses: actions/setup-go@v2-beta
+        uses: actions/setup-go@v2
         with:
           go-version: '^1.14'
       - name: Show go version
@@ -18,4 +24,4 @@ jobs:
           GOPROXY: "https://proxy.golang.org"
         run: go get -v -t -d ./...
       - name: Testing
-        run: make test
+        run: go test -v -race -count=8 -coverprofile=coverage.out ./...

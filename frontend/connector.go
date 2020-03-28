@@ -20,13 +20,22 @@ type Connector interface {
 	Close() error
 }
 
+const (
+	http3ClientDefaultIdleTimeout    = 8 * time.Minute
+	http3ClientDefaultMaxIdleTimeout = http3ClientDefaultIdleTimeout + 2*time.Minute
+)
+
 type caddyHTTP3Connector struct {
 	url                string // e.g. goodog.x.io/?version=v1&protocol=tcp&compression=snappy
 	insecureSkipVerify bool
 	timeout            time.Duration
 
+	// FIXME:
+	// Is this a solution for https://github.com/lucas-clemente/quic-go/issues/765?
 	mu      sync.Mutex
 	clients *http3ClientsPriorityQueue
+	// conns   *counter
+	// streams *counter
 }
 
 func newCaddyHTTP3Connector(serverURL string, insecureSkipVerify bool, timeout time.Duration) *caddyHTTP3Connector {
@@ -50,7 +59,7 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, 
 	req.Header.Set("User-Agent", "goodog/frontend")
 
 	// TODO(damnever); connect timeout
-	client := c.getClient()
+	client := c.getclient()
 	resp, err := client.Do(req)
 	if err != nil {
 		reqr.Close()
@@ -59,7 +68,9 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, 
 			_, _ = io.Copy(ioutil.Discard, resp.Body)
 			resp.Body.Close()
 		}
-		c.release(client)
+		// FIXME(damnever): close it and all related streams since it can not reconnect.
+		// Reuse it if upstream implementation has a fix.
+		c.destroy(client)
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -83,51 +94,74 @@ func (c *caddyHTTP3Connector) Connect(ctx context.Context) (io.ReadWriteCloser, 
 func (c *caddyHTTP3Connector) Close() error {
 	c.mu.Lock()
 	for _, client := range *c.clients {
-		client.CloseIdleConnections()
+		client.Close()
 	}
 	c.mu.Unlock()
 	return nil
 }
 
-func (c *caddyHTTP3Connector) getClient() *http3ClientWrapper {
+func (c *caddyHTTP3Connector) getclient() *http3ClientWrapper {
 	// FIXME(damnever): magic number
 	// Ref: https://github.com/lucas-clemente/quic-go/wiki/DoS-mitigations
 	const maxStreamsPreConn = 66
+	const minClients = 2
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.clients.Len() == 0 || (*c.clients)[0].streams >= maxStreamsPreConn {
-		client := &http3ClientWrapper{Client: c.newHTTPClient()}
+	now := time.Now()
+	expiredAt := now.Add(http3ClientDefaultIdleTimeout)
+	for c.clients.Len() > 0 && (*c.clients)[0].lastActive.After(expiredAt) && (*c.clients)[0].streams == 0 {
+		heap.Pop(c.clients).(*http3ClientWrapper).Close()
+	}
+
+	if c.clients.Len() < minClients || (*c.clients)[0].streams >= maxStreamsPreConn {
+		client := c.newHTTPClientWrapper()
+		client.lastActive = now
+		client.streams++
 		heap.Push(c.clients, client)
 		return client
 	}
 	client := (*c.clients)[0] // DO NOT pop it.
 	client.streams++          // Increase the counter immediately to avoid bursting..
+	client.lastActive = now
 	heap.Fix(c.clients, client.index)
 	return client
 }
 
 func (c *caddyHTTP3Connector) release(client *http3ClientWrapper) {
+	now := time.Now()
 	c.mu.Lock()
+	client.lastActive = now
 	client.streams--
 	heap.Fix(c.clients, client.index)
 	c.mu.Unlock()
 }
 
-func (c *caddyHTTP3Connector) newHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: &http3.RoundTripper{
-			DisableCompression: true,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: c.insecureSkipVerify,
-			},
-			QuicConfig: &quic.Config{
-				IdleTimeout: 6 * time.Minute,
-				KeepAlive:   true,
-			},
-		},
-		Timeout: c.timeout,
+func (c *caddyHTTP3Connector) destroy(client *http3ClientWrapper) {
+	c.mu.Lock()
+	if client.index > 0 { // FIXME(damnever): -1 means removed already, encapsulation needed.
+		heap.Remove(c.clients, client.index)
 	}
+	c.mu.Unlock()
+	_ = client.Close()
+}
+
+func (c *caddyHTTP3Connector) newHTTPClientWrapper() *http3ClientWrapper {
+	transport := &http3.RoundTripper{
+		DisableCompression: true,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: c.insecureSkipVerify,
+		},
+		QuicConfig: &quic.Config{
+			MaxIdleTimeout: http3ClientDefaultMaxIdleTimeout,
+			KeepAlive:      true,
+		},
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   c.timeout,
+	}
+	return &http3ClientWrapper{Client: client}
 }
 
 type withReqResp struct {
@@ -150,8 +184,8 @@ func (rr *withReqResp) Write(p []byte) (int, error) {
 }
 
 func (rr *withReqResp) Close() error {
-	rr.reqr.Close()
 	rr.reqw.Close()
+	rr.reqr.Close()
 	rr.rrmu.Lock() // Fix potential data race
 	_, _ = io.Copy(ioutil.Discard, rr.respr)
 	err := rr.respr.Close()
@@ -162,8 +196,17 @@ func (rr *withReqResp) Close() error {
 
 type http3ClientWrapper struct {
 	*http.Client
-	streams int
-	index   int
+	transport  *http3.RoundTripper
+	streams    int
+	index      int
+	lastActive time.Time
+}
+
+func (c *http3ClientWrapper) Close() error {
+	c.CloseIdleConnections() // Useless
+	// https://github.com/lucas-clemente/quic-go/issues/765
+	defer func() { _ = recover() }()
+	return c.transport.Close()
 }
 
 type http3ClientsPriorityQueue []*http3ClientWrapper
