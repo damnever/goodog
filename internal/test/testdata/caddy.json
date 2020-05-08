@@ -46,8 +46,7 @@
             {
               "match": { "sni": [""] },
               "certificate_selection": {
-                "policy": "custom",
-                "tag": "goodog"
+                "any_tag": ["goodog"]
               }
             }
           ]

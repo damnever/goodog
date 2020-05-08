@@ -7,16 +7,14 @@
   "apps": {
     "tls": {
       "automation": {
+        "renew_interval": "720h",
         "policies": [{
-          "hosts": [ "<DOMAIN>" ],
-          "management": {
+          "subjects": [ "<DOMAIN>" ],
+          "issuer": {
             "module": "acme",
             "email": "<ACME-EMAIL>",
-            "renew_ahead": "720h",
-            "acme_timeout": "300s",
-            "on_demand": false
-          },
-          "manage_sync": false
+            "acme_timeout": "300s"
+          }
         }]
       }
     },

@@ -17,11 +17,19 @@ import (
 	"github.com/damnever/goodog/internal/pkg/snappypool"
 )
 
+var (
+	errNotInit     = fmt.Errorf("goodog: not initialized")
+	errNoUpstreams = fmt.Errorf("goodog: one of upstream_tcp or upstream_udp must be given")
+
+	_ caddy.Provisioner           = (*GoodogCaddyAdapter)(nil)
+	_ caddy.Validator             = (*GoodogCaddyAdapter)(nil)
+	_ caddy.CleanerUpper          = (*GoodogCaddyAdapter)(nil)
+	_ caddyhttp.MiddlewareHandler = (*GoodogCaddyAdapter)(nil)
+	_ caddyfile.Unmarshaler       = (*GoodogCaddyAdapter)(nil)
+)
+
 func init() {
-	err := caddy.RegisterModule(&GoodogCaddyAdapter{})
-	if err != nil {
-		panic(err)
-	}
+	caddy.RegisterModule(&GoodogCaddyAdapter{})
 	httpcaddyfile.RegisterHandlerDirective("goodog", parseCaddyfile)
 }
 
@@ -83,10 +91,10 @@ func (g *GoodogCaddyAdapter) Provision(ctx caddy.Context) error {
 
 func (g *GoodogCaddyAdapter) Validate() error {
 	if g.forwarder == nil {
-		return fmt.Errorf("goodog: not initialized")
+		return errNotInit
 	}
 	if g.Options.UpstreamTCP == "" && g.Options.UpstreamUDP == "" {
-		return fmt.Errorf("goodog: one of upstream_tcp or upstream_udp must be given")
+		return errNoUpstreams
 	}
 	return nil
 }
