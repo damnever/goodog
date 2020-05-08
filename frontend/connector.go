@@ -205,6 +205,7 @@ type http3ClientWrapper struct {
 func (c *http3ClientWrapper) Close() error {
 	c.CloseIdleConnections() // Useless
 	// FIXME(damnever): remove it as soon as upstream release new version.
+	// https://github.com/lucas-clemente/quic-go/issues/765
 	defer func() { _ = recover() }()
 	return c.transport.Close()
 }

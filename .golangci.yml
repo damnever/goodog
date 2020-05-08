@@ -96,6 +96,10 @@ linters-settings:
         sizeThreshold: 128
       hugeParam:
         sizeThreshold: 512
+  nestif:
+    min-complexity: 8
+  testpackage:
+    skip-regexp: internal
 
 linters:
   enable-all: true
@@ -148,3 +152,6 @@ issues:
       - deadcode
       - unused
       text: "`_"
+    - linters:
+      - goerr113
+      text: "do not define dynamic errors, use wrapped static errors instead"
