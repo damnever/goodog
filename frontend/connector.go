@@ -21,9 +21,8 @@ type Connector interface {
 }
 
 const (
-	http3ClientDefaultHandshakeTimeout = 6 * time.Second
-	http3ClientDefaultIdleTimeout      = 8 * time.Minute
-	http3ClientDefaultMaxIdleTimeout   = http3ClientDefaultIdleTimeout + 2*time.Minute
+	http3ClientDefaultIdleTimeout    = 8 * time.Minute
+	http3ClientDefaultMaxIdleTimeout = http3ClientDefaultIdleTimeout + 2*time.Minute
 )
 
 type caddyHTTP3Connector struct {
@@ -32,7 +31,7 @@ type caddyHTTP3Connector struct {
 	timeout            time.Duration
 
 	mu      sync.Mutex
-	clients *http3ClientsPriorityQueue
+	clients *http3ClientsPriorityQueue // FIXME: why am I doing this?
 	// conns   *counter
 	// streams *counter
 }
@@ -142,7 +141,7 @@ func (c *caddyHTTP3Connector) destroy(client *http3ClientWrapper) {
 		heap.Remove(c.clients, client.index)
 	}
 	c.mu.Unlock()
-	client.Close()
+	_ = client.Close()
 }
 
 func (c *caddyHTTP3Connector) newHTTPClientWrapper() *http3ClientWrapper {
@@ -152,9 +151,8 @@ func (c *caddyHTTP3Connector) newHTTPClientWrapper() *http3ClientWrapper {
 			InsecureSkipVerify: c.insecureSkipVerify,
 		},
 		QuicConfig: &quic.Config{
-			HandshakeTimeout: http3ClientDefaultHandshakeTimeout,
-			MaxIdleTimeout:   http3ClientDefaultMaxIdleTimeout,
-			KeepAlive:        true,
+			MaxIdleTimeout: http3ClientDefaultMaxIdleTimeout,
+			KeepAlive:      true,
 		},
 	}
 	client := &http.Client{
@@ -204,7 +202,6 @@ type http3ClientWrapper struct {
 
 func (c *http3ClientWrapper) Close() error {
 	c.CloseIdleConnections() // Useless
-	// FIXME(damnever): remove it as soon as upstream release new version.
 	// https://github.com/lucas-clemente/quic-go/issues/765
 	defer func() { _ = recover() }()
 	return c.transport.Close()

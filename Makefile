@@ -35,19 +35,21 @@ docker-image:  ## Build docker image. (Args: REG=docker.io TAG=latest TZ=Asia/Sh
 
 
 
-GOLANGCI_LINT_VERSION ?= "latest"
+GOLANGCI_LINT_VERSION ?= "v1.32.2"
 
-test: SHELL:=/bin/bash
-test:  ## Run test cases. (Args: GOLANGCI_LINT_VERSION=latest)
+local-test: SHELL:=/bin/bash
+local-test:  ## Run test cases. (Args: GOLANGCI_LINT_VERSION=latest)
 	GOLANGCI_LINT_CMD=golangci-lint; \
-	if [[ ! -x $$(command -v golangci-lint) ]]; then \
+	_VERSION=$(GOLANGCI_LINT_VERSION); _VERSION=$${_VERSION#v}; \
+	if [[ ! -x $$(command -v golangci-lint) ]] || [[ "$${_VERSION}" != "latest" && $$(golangci-lint version 2>&1) != *"$${_VERSION}"* ]]; then \
 		if [[ ! -e ./bin/golangci-lint ]]; then \
-			curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s $(GOLANGCI_LINT_VERSION); \
+			curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s $(GOLANGCI_LINT_VERSION) || exit 1; \
 		fi; \
 		GOLANGCI_LINT_CMD=./bin/golangci-lint; \
 	fi; \
-    	$${GOLANGCI_LINT_CMD} run ./...
-	go test -v -race -coverprofile=coverage.out ./...
+	$${GOLANGCI_LINT_CMD} run ./...
+	go install github.com/rakyll/gotest@latest
+	gotest -v -race -coverprofile=coverage.out ./...
 	# go tool cover -html=coverage.out  # -o coverage.html
 
 
